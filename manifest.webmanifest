@@ -1,0 +1,13 @@
+{
+  "name": "ระบบแจ้งลางาน",
+  "short_name": "แจ้งลา",
+  "description": "ยื่นใบลา อนุมัติ และดูวันลาคงเหลือ",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#F5F6F4",
+  "theme_color": "#0F6E56",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

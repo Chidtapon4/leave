@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0F6E56">
+  <title>ระบบแจ้งลางาน</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- หน้า login -->
+  <section id="view-login" class="login-wrap hidden">
+    <div class="login-card">
+      <div class="login-logo">🌴</div>
+      <h1>ระบบแจ้งลางาน</h1>
+      <p class="muted">เข้าสู่ระบบด้วยรหัสพนักงานและ PIN</p>
+      <form id="login-form">
+        <label>รหัสพนักงาน
+          <input id="login-emp" type="text" autocomplete="username" placeholder="เช่น EMP001" required>
+        </label>
+        <label>PIN
+          <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" required>
+        </label>
+        <button type="submit" class="btn primary full" id="login-btn">เข้าสู่ระบบ</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- แถบบนหลัง login -->
+  <header id="topbar" class="hidden">
+    <span id="topbar-title">ยื่นใบลา</span>
+    <div class="topbar-right">
+      <span id="topbar-user" class="muted"></span>
+      <button id="logout-btn" class="btn small" title="ออกจากระบบ">ออก</button>
+    </div>
+  </header>
+
+  <main id="main" class="hidden">
+
+    <!-- หน้าหลัก: วันลาคงเหลือ + ฟอร์มยื่นลา -->
+    <section id="view-home" class="view">
+      <div id="balance-cards" class="balance-grid"></div>
+
+      <form id="leave-form" class="card">
+        <h2>ยื่นใบลา</h2>
+        <label>ประเภทการลา
+          <select id="f-type" required></select>
+        </label>
+        <div class="row2">
+          <label>ตั้งแต่วันที่
+            <input id="f-start" type="date" required>
+          </label>
+          <label>ถึงวันที่
+            <input id="f-end" type="date" required>
+          </label>
+        </div>
+        <label class="check-row">
+          <input id="f-half" type="checkbox" disabled>
+          <span>ลาครึ่งวัน <small class="muted">(เลือกได้เมื่อลาวันเดียว)</small></span>
+        </label>
+        <p id="f-days" class="day-preview">รวม — วันทำการ</p>
+        <label>เหตุผล
+          <textarea id="f-reason" rows="2" placeholder="ระบุเหตุผลการลา" required></textarea>
+        </label>
+        <label>ไฟล์แนบ เช่น ใบรับรองแพทย์ <small class="muted">(ไม่เกิน 4 MB)</small>
+          <input id="f-file" type="file" accept="image/*,.pdf">
+        </label>
+        <button type="submit" class="btn primary full" id="f-submit">ส่งใบลา</button>
+      </form>
+    </section>
+
+    <!-- ประวัติใบลาของฉัน -->
+    <section id="view-history" class="view hidden">
+      <div id="history-list" class="list"></div>
+    </section>
+
+    <!-- รายการรออนุมัติ (หัวหน้า/แอดมิน) -->
+    <section id="view-approve" class="view hidden">
+      <div id="approve-list" class="list"></div>
+    </section>
+
+    <!-- dashboard (HR/admin) -->
+    <section id="view-dashboard" class="view hidden wide">
+      <div id="dash-stats" class="stat-grid"></div>
+
+      <div class="card">
+        <h2>การใช้วันลาปีนี้ (ทั้งบริษัท)</h2>
+        <div id="dash-usage"></div>
+      </div>
+
+      <div class="card">
+        <div class="cal-head">
+          <button class="btn small" id="cal-prev">‹</button>
+          <h2 id="cal-title"></h2>
+          <button class="btn small" id="cal-next">›</button>
+        </div>
+        <div id="calendar"></div>
+        <p class="muted small-note">สีทึบ = อนุมัติแล้ว · สีจาง = รออนุมัติ</p>
+      </div>
+
+      <div class="card">
+        <h2>วันลาคงเหลือรายคน</h2>
+        <div class="table-scroll"><table id="dash-table"></table></div>
+      </div>
+    </section>
+
+  </main>
+
+  <nav id="bottomnav" class="hidden">
+    <button data-view="home" class="nav-btn active"><span>📝</span>ยื่นลา</button>
+    <button data-view="history" class="nav-btn"><span>🕘</span>ประวัติ</button>
+    <button data-view="approve" class="nav-btn hidden"><span>✅</span>อนุมัติ</button>
+    <button data-view="dashboard" class="nav-btn hidden"><span>📊</span>สรุป</button>
+  </nav>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="loading" class="loading hidden"><div class="spinner"></div></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
