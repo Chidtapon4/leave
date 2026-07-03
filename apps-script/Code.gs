@@ -32,27 +32,68 @@ function doPost(e) {
   }
 }
 
-// ลิงก์อนุมัติจากอีเมล (กดปุ่มเดียว ไม่ต้อง login)
+// ลิงก์อนุมัติจากอีเมล — เปิดหน้ายืนยันก่อนเสมอ ไม่เปลี่ยนสถานะจากการเปิดลิงก์ตรง ๆ
+// เพราะระบบสแกนอีเมล (SafeLinks/แอนติไวรัส) จะเปิดลิงก์ในอีเมลอัตโนมัติ
+// การอนุมัติจริงเกิดเมื่อกดปุ่มยืนยัน (JavaScript) ในหน้านั้นเท่านั้น
 function doGet(e) {
   const p = e.parameter || {};
   if (p.action === 'decide') {
-    let msg;
     try {
       const payload = verifyToken_(p.t); // 'decide|reqId|approverId'
       const parts = payload.split('|');
       if (parts[0] !== 'decide' || parts[1] !== p.r) throw new Error('ลิงก์ไม่ถูกต้อง');
       const decision = p.d === 'approved' ? 'approved' : 'rejected';
+      const found = findReq_(p.r);
+      if (!found) throw new Error('ไม่พบใบลา');
+      if (found.obj.status !== 'pending') {
+        return page_('ℹ️ ใบลานี้ถูกดำเนินการไปแล้ว (สถานะ: ' + statusTh_(found.obj.status) + ')');
+      }
+      if (p.confirm !== '1') return confirmPage_(found.obj, decision, p);
       decide_(p.r, decision, parts[2], '');
-      msg = decision === 'approved' ? '✅ อนุมัติใบลาเรียบร้อยแล้ว' : '❌ บันทึกไม่อนุมัติเรียบร้อยแล้ว';
+      return page_(decision === 'approved' ? '✅ อนุมัติใบลาเรียบร้อยแล้ว' : '❌ บันทึกไม่อนุมัติเรียบร้อยแล้ว');
     } catch (err) {
-      msg = '⚠️ ' + String(err.message || err);
+      return page_('⚠️ ' + String(err.message || err));
     }
-    return HtmlService.createHtmlOutput(
-      '<div style="font-family:sans-serif;text-align:center;padding:48px 16px;font-size:20px">' + msg +
-      '<br><br><span style="font-size:14px;color:#666">ปิดหน้านี้ได้เลย</span></div>'
-    );
   }
   return json_({ ok: true, service: 'leave-system' });
+}
+
+function page_(msg) {
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:sans-serif;text-align:center;padding:48px 16px;font-size:20px">' + msg +
+    '<br><br><span style="font-size:14px;color:#666">ปิดหน้านี้ได้เลย</span></div>'
+  );
+}
+
+function confirmPage_(reqObj, decision, p) {
+  const type = rows_(SHEET.TYPE).filter(t => t.type_id === reqObj.type_id)[0];
+  const approve = decision === 'approved';
+  const url = ScriptApp.getService().getUrl()
+    + '?action=decide&r=' + encodeURIComponent(p.r)
+    + '&d=' + encodeURIComponent(decision)
+    + '&t=' + encodeURIComponent(p.t) + '&confirm=1';
+  const color = approve ? '#0F6E56' : '#A32D2D';
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:sans-serif;max-width:420px;margin:32px auto;padding:0 16px;text-align:center">' +
+    '<h2 style="color:' + color + '">' + (approve ? 'ยืนยันการอนุมัติใบลา' : 'ยืนยันการไม่อนุมัติใบลา') + '</h2>' +
+    '<div style="background:#F5F6F4;border-radius:12px;padding:16px;text-align:left;line-height:1.9">' +
+    '<b>' + esc_(reqObj.emp_name) + '</b> (' + esc_(reqObj.emp_id) + ')<br>' +
+    esc_(type ? type.name : reqObj.type_id) + ' รวม <b>' + esc_(reqObj.days) + ' วันทำการ</b><br>' +
+    'วันที่ ' + esc_(reqObj.start_date) + ' ถึง ' + esc_(reqObj.end_date) + '<br>' +
+    'เหตุผล: ' + esc_(reqObj.reason || '-') +
+    (reqObj.file_url ? '<br><a href="' + esc_(reqObj.file_url) + '" target="_blank">📎 เปิดไฟล์แนบ</a>' : '') +
+    '</div>' +
+    '<button onclick="this.disabled=true;this.textContent=\'กำลังบันทึก…\';window.top.location.href=\'' + url + '\'" ' +
+    'style="margin-top:24px;padding:14px 40px;font-size:17px;border:none;border-radius:8px;cursor:pointer;color:#fff;background:' + color + '">' +
+    (approve ? '✓ ยืนยันอนุมัติ' : '✕ ยืนยันไม่อนุมัติ') + '</button>' +
+    '<p style="color:#888;font-size:13px;margin-top:16px">ถ้ากดผิดปุ่มจากอีเมล ปิดหน้านี้ได้เลย จะยังไม่มีอะไรถูกบันทึก</p></div>'
+  );
+}
+
+function esc_(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ---------- ติดตั้งครั้งแรก ----------
@@ -392,7 +433,7 @@ function notifyManager_(emp, info) {
       '<p style="margin:24px 0">' +
       '<a href="' + approveUrl + '" style="' + btn + ';background:#0F6E56">✓ อนุมัติ</a>&nbsp;&nbsp;' +
       '<a href="' + rejectUrl + '" style="' + btn + ';background:#A32D2D">✕ ไม่อนุมัติ</a></p>' +
-      '<p style="color:#888;font-size:13px">กดปุ่มได้เลยไม่ต้อง login หรือเข้าไปจัดการในเว็บที่แท็บ "อนุมัติ"</p></div>',
+      '<p style="color:#888;font-size:13px">กดปุ่มแล้วยืนยันอีกครั้งในหน้าที่เปิดขึ้น (ไม่ต้อง login) หรือเข้าไปจัดการในเว็บที่แท็บ "อนุมัติ"</p></div>',
   });
 }
 
