@@ -9,6 +9,10 @@ const TZ = 'Asia/Bangkok';
 const TOKEN_HOURS = 12;      // อายุ token หลัง login
 const DECIDE_LINK_DAYS = 7;  // อายุลิงก์อนุมัติในอีเมล
 
+// true  = บริษัททำงานทั้งสัปดาห์ นับวันลาทุกวัน (รวมเสาร์-อาทิตย์และวันหยุดในแท็บ Holidays)
+// false = นับเฉพาะวันทำการ ข้ามเสาร์-อาทิตย์และวันหยุดในแท็บ Holidays
+const WORK_ALL_WEEK = true;
+
 // ---------- จุดรับ request ----------
 
 function doPost(e) {
@@ -23,6 +27,7 @@ function doPost(e) {
       pending: apiPending_,
       decide: apiDecide_,
       dashboard: apiDashboard_,
+      addEmployee: apiAddEmployee_,
     };
     const fn = handlers[req.action];
     if (!fn) throw new Error('ไม่รู้จักคำสั่ง: ' + req.action);
@@ -219,6 +224,7 @@ function bundle_(emp, token) {
     types: rows_(SHEET.TYPE),
     holidays: rows_(SHEET.HOL).map(h => fmtD_(h.date)),
     balances: balances_(emp.emp_id),
+    work_all_week: WORK_ALL_WEEK,
   };
 }
 
@@ -341,6 +347,36 @@ function decide_(reqId, decision, approverId, comment) {
   }
 }
 
+// ---------- API: เพิ่มพนักงาน (HR/admin) ----------
+
+function apiAddEmployee_(req) {
+  const emp = auth_(req.token);
+  requireRole_(emp, ['admin']);
+
+  const id = String(req.emp_id || '').trim().toUpperCase();
+  if (!/^[A-Z0-9\-_.]{2,20}$/.test(id)) throw new Error('รหัสพนักงานต้องเป็น A-Z หรือตัวเลข 2-20 ตัว');
+  const name = String(req.name || '').trim();
+  if (!name) throw new Error('กรุณาใส่ชื่อ-สกุล');
+  const pin = String(req.pin || '');
+  if (!/^\d{4,8}$/.test(pin)) throw new Error('PIN ต้องเป็นตัวเลข 4-8 หลัก');
+  const role = ['employee', 'approver', 'admin'].indexOf(req.role) > -1 ? req.role : 'employee';
+  const managerId = String(req.manager_id || '').trim().toUpperCase();
+  const email = String(req.email || '').trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    if (findEmp_(id)) throw new Error('มีรหัสพนักงาน ' + id + ' อยู่แล้ว');
+    if (managerId && !findEmp_(managerId)) throw new Error('ไม่พบรหัสหัวหน้า ' + managerId);
+    ss_().getSheetByName(SHEET.EMP)
+      .appendRow([id, name, String(req.dept || '').trim(), email, hashPin_(id, pin), role, managerId]);
+    return { ok: true, emp_id: id };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ---------- API: dashboard (HR/admin) ----------
 
 function apiDashboard_(req) {
@@ -390,7 +426,7 @@ function countDays_(startStr, endStr, halfDay, holidayMap) {
   while (d <= end) {
     const dow = d.getDay();
     const ds = fmtDate_(d);
-    if (dow !== 0 && dow !== 6 && !holidayMap[ds]) count++;
+    if (WORK_ALL_WEEK || (dow !== 0 && dow !== 6 && !holidayMap[ds])) count++;
     d.setDate(d.getDate() + 1);
   }
   if (halfDay && count === 1) count = 0.5;

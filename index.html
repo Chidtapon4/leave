@@ -106,6 +106,40 @@
         <h2>วันลาคงเหลือรายคน</h2>
         <div class="table-scroll"><table id="dash-table"></table></div>
       </div>
+
+      <form id="emp-form" class="card">
+        <h2>เพิ่มพนักงานใหม่</h2>
+        <div class="row2">
+          <label>รหัสพนักงาน
+            <input id="e-id" required placeholder="เช่น EMP011">
+          </label>
+          <label>PIN (ตัวเลข 4-8 หลัก)
+            <input id="e-pin" required inputmode="numeric" pattern="\d{4,8}" placeholder="เช่น 1234">
+          </label>
+        </div>
+        <label>ชื่อ-สกุล
+          <input id="e-name" required placeholder="เช่น สมปอง ตั้งใจ">
+        </label>
+        <div class="row2">
+          <label>แผนก
+            <input id="e-dept" placeholder="เช่น บัญชี">
+          </label>
+          <label>บทบาท
+            <select id="e-role">
+              <option value="employee">พนักงาน</option>
+              <option value="approver">หัวหน้า (อนุมัติได้)</option>
+              <option value="admin">HR/แอดมิน</option>
+            </select>
+          </label>
+        </div>
+        <label>อีเมล <small class="muted">(ใช้รับแจ้งเตือน เว้นว่างได้)</small>
+          <input id="e-email" type="email" placeholder="name@company.com">
+        </label>
+        <label>หัวหน้าผู้อนุมัติใบลาของคนนี้
+          <select id="e-manager"><option value="">— ไม่ระบุ (admin อนุมัติแทน) —</option></select>
+        </label>
+        <button type="submit" class="btn primary full" id="e-submit">เพิ่มพนักงาน</button>
+      </form>
     </section>
 
   </main>

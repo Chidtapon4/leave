@@ -12,6 +12,7 @@ const state = {
   balances: [],
   dashboard: null,
   calMonth: null, // Date ต้นเดือนที่ปฏิทินแสดงอยู่
+  workAllWeek: false, // true = นับวันลาทุกวัน ไม่ข้ามเสาร์-อาทิตย์/วันหยุด (ตั้งค่าที่ WORK_ALL_WEEK ใน Code.gs)
 };
 
 const STATUS_TH = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', cancelled: 'ยกเลิก' };
@@ -70,6 +71,7 @@ function applyBundle(b) {
   state.types = b.types;
   state.holidays = new Set(b.holidays);
   state.balances = b.balances;
+  state.workAllWeek = !!b.work_all_week;
   localStorage.setItem('leave_token', b.token);
 }
 
@@ -163,7 +165,7 @@ function countBusinessDays(startStr, endStr, halfDay) {
   const end = parseDate(endStr);
   while (d <= end) {
     const dow = d.getDay();
-    if (dow !== 0 && dow !== 6 && !state.holidays.has(fmtDate(d))) count++;
+    if (state.workAllWeek || (dow !== 0 && dow !== 6 && !state.holidays.has(fmtDate(d)))) count++;
     d.setDate(d.getDate() + 1);
   }
   if (halfDay && count === 1) count = 0.5;
@@ -178,7 +180,9 @@ function onDatesChange() {
   if (half.disabled) half.checked = false;
   const days = countBusinessDays(s, e, half.checked);
   $('#f-days').textContent = days > 0
-    ? `รวม ${fmtNum(days)} วันทำการ (ไม่นับเสาร์-อาทิตย์และวันหยุดบริษัท)`
+    ? (state.workAllWeek
+      ? `รวม ${fmtNum(days)} วัน`
+      : `รวม ${fmtNum(days)} วันทำการ (ไม่นับเสาร์-อาทิตย์และวันหยุดบริษัท)`)
     : 'ช่วงที่เลือกไม่มีวันทำการ';
 }
 
@@ -336,6 +340,7 @@ async function loadDashboard() {
     renderUsage(res);
     renderCalendar();
     renderDashTable(res);
+    renderManagerOptions(res);
   } catch (err) {
     toast(err.message, true);
   }
@@ -374,7 +379,7 @@ function renderCalendar() {
   for (let day = 1; day <= daysInMonth; day++) {
     const ds = fmtDate(new Date(y, m, day));
     const dow = new Date(y, m, day).getDay();
-    const isOff = dow === 0 || dow === 6 || state.holidays.has(ds);
+    const isOff = !state.workAllWeek && (dow === 0 || dow === 6 || state.holidays.has(ds));
     const chips = isOff ? [] : res.leaves.filter((l) => l.start_date <= ds && ds <= l.end_date);
     const shown = chips.slice(0, 3);
     html += `<div class="cal-cell${isOff ? ' off' : ''}${ds === today ? ' today' : ''}">
@@ -403,6 +408,40 @@ function renderDashTable(res) {
   }).join('');
   $('#dash-table').innerHTML = head + rows;
 }
+
+// ---------- เพิ่มพนักงาน (HR/admin) ----------
+
+function renderManagerOptions(res) {
+  const sel = $('#e-manager');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— ไม่ระบุ (admin อนุมัติแทน) —</option>'
+    + res.employees.map((e) => `<option value="${esc(e.emp_id)}">${esc(e.name)} (${esc(e.emp_id)})</option>`).join('');
+  sel.value = current;
+}
+
+$('#emp-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('#e-submit');
+  btn.disabled = true;
+  try {
+    const res = await api('addEmployee', {
+      emp_id: $('#e-id').value.trim(),
+      name: $('#e-name').value.trim(),
+      dept: $('#e-dept').value.trim(),
+      email: $('#e-email').value.trim(),
+      pin: $('#e-pin').value,
+      role: $('#e-role').value,
+      manager_id: $('#e-manager').value,
+    });
+    toast(`เพิ่มพนักงาน ${res.emp_id} เรียบร้อย ✓`);
+    $('#emp-form').reset();
+    loadDashboard();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ---------- ตัวช่วย ----------
 
