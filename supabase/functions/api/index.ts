@@ -34,8 +34,10 @@ Deno.serve(async (req) => {
       login: apiLogin,
       me: apiMe,
       submit: apiSubmit,
+      updateRequest: apiUpdateRequest,
       myRequests: apiMyRequests,
       cancel: apiCancel,
+      changePin: apiChangePin,
       pending: apiPending,
       decide: apiDecide,
       dashboard: apiDashboard,
@@ -113,10 +115,15 @@ async function apiMe(b: any) {
 }
 
 async function bundle(emp: any, token: string) {
+  const manager = emp.manager_id ? await getEmp(emp.manager_id) : null;
   return {
     ok: true,
     token,
-    profile: { emp_id: emp.emp_id, name: emp.name, dept: emp.dept, role: emp.role },
+    profile: {
+      emp_id: emp.emp_id, name: emp.name, dept: emp.dept, role: emp.role,
+      email: emp.email ?? '', phone: emp.phone ?? '',
+      manager_id: emp.manager_id ?? '', manager_name: manager?.name ?? '',
+    },
     types: await getTypes(),
     holidays: await getHolidays(),
     balances: await balances(emp.emp_id),
@@ -183,14 +190,83 @@ async function apiMyRequests(b: any) {
   return { ok: true, requests: (data ?? []).map(numify) };
 }
 
+// ยกเลิกได้: ใบที่รออนุมัติ หรือใบที่อนุมัติแล้วแต่ยังไม่ถึงวันเริ่มลา (คืนวันลา + แจ้งหัวหน้า)
 async function apiCancel(b: any) {
   const emp = await auth(b.token);
   const row = await getRequest(String(b.req_id ?? ''));
   if (!row || row.emp_id !== emp.emp_id) throw new Error('ไม่พบใบลา');
-  if (row.status !== 'pending') throw new Error('ยกเลิกได้เฉพาะใบลาที่รออนุมัติ');
-  const { error } = await supa.from('leave_requests')
+  const canCancel = row.status === 'pending' ||
+    (row.status === 'approved' && row.start_date > todayBkk());
+  if (!canCancel) throw new Error('ยกเลิกได้เฉพาะใบลาที่รออนุมัติ หรืออนุมัติแล้วที่ยังไม่ถึงวันเริ่มลา');
+  const { data, error } = await supa.from('leave_requests')
     .update({ status: 'cancelled', decided_at: new Date().toISOString() })
-    .eq('req_id', row.req_id).eq('status', 'pending');
+    .eq('req_id', row.req_id).eq('status', row.status).select('req_id');
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error('ใบลานี้ถูกดำเนินการไปแล้ว ลองรีเฟรชหน้า');
+  if (row.status === 'approved') await notifyManagerCancelled(emp, row);
+  return { ok: true };
+}
+
+// แก้ไขใบลา (เฉพาะที่ยังรออนุมัติ) — กรณีลาผิดวัน
+async function apiUpdateRequest(b: any) {
+  const emp = await auth(b.token);
+  const row = await getRequest(String(b.req_id ?? ''));
+  if (!row || row.emp_id !== emp.emp_id) throw new Error('ไม่พบใบลา');
+  if (row.status !== 'pending') throw new Error('แก้ไขได้เฉพาะใบลาที่รออนุมัติ — ใบที่อนุมัติแล้วให้ยกเลิกแล้วยื่นใหม่');
+
+  const types = await getTypes();
+  const type = types.find((t) => t.type_id === b.type_id);
+  if (!type) throw new Error('ประเภทการลาไม่ถูกต้อง');
+  const start = String(b.start ?? '');
+  const end = String(b.end ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) throw new Error('รูปแบบวันที่ไม่ถูกต้อง');
+  if (end < start) throw new Error('วันสิ้นสุดต้องไม่ก่อนวันเริ่ม');
+  const halfDay = !!b.half_day;
+  if (halfDay && start !== end) throw new Error('ลาครึ่งวันได้เมื่อเลือกวันเดียวเท่านั้น');
+
+  const holidays = new Set(await getHolidays());
+  const days = countDays(start, end, halfDay, holidays, await workAllWeek());
+  if (days <= 0) throw new Error('ช่วงที่เลือกไม่มีวันทำการ (ตรงวันหยุดทั้งหมด)');
+
+  // เช็กโควตาโดยไม่นับวันของใบเดิมซ้ำ
+  if (type.quota_days !== null) {
+    const bal = (await balances(emp.emp_id)).find((x) => x.type_id === type.type_id)!;
+    const oldSameType = row.type_id === type.type_id ? row.days : 0;
+    if (bal.quota !== null && bal.used + bal.pending - oldSameType + days > bal.quota) {
+      throw new Error(`วันลาคงเหลือไม่พอ (${type.name} เหลือ ${bal.quota - bal.used - bal.pending + oldSameType} วัน)`);
+    }
+  }
+
+  // แนบไฟล์ใหม่ = แทนที่ไฟล์เดิม / ไม่แนบ = คงไฟล์เดิม
+  let fileUrl = row.file_url ?? '';
+  if (b.file?.data) {
+    const bin = Uint8Array.from(atob(b.file.data), (c) => c.charCodeAt(0));
+    const safeName = String(b.file.name ?? 'attachment').replace(/[^\w.\-ก-๙]+/g, '_');
+    const path = `${emp.emp_id}/${Date.now()}_${safeName}`;
+    const { error } = await supa.storage.from('attachments')
+      .upload(path, bin, { contentType: b.file.mime || 'application/octet-stream' });
+    if (error) throw new Error('อัปโหลดไฟล์ไม่สำเร็จ: ' + error.message);
+    fileUrl = supa.storage.from('attachments').getPublicUrl(path).data.publicUrl;
+  }
+
+  const { data, error } = await supa.from('leave_requests')
+    .update({ type_id: type.type_id, start_date: start, end_date: end, half_day: halfDay, days, reason: String(b.reason ?? ''), file_url: fileUrl })
+    .eq('req_id', row.req_id).eq('status', 'pending').select('req_id');
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error('ใบลานี้ถูกดำเนินการไปแล้ว ลองรีเฟรชหน้า');
+
+  await notifyManager(emp, { req_id: row.req_id, type_name: type.name, start, end, days, reason: b.reason, file_url: fileUrl, edited: true });
+  return { ok: true, days };
+}
+
+// พนักงานเปลี่ยน PIN ของตัวเอง (ต้องรู้ PIN เดิม)
+async function apiChangePin(b: any) {
+  const emp = await auth(b.token);
+  if (emp.pin_hash !== await hashPin(emp.emp_id, String(b.old_pin ?? ''))) throw new Error('PIN เดิมไม่ถูกต้อง');
+  const pin = String(b.new_pin ?? '');
+  if (!/^\d{4,8}$/.test(pin)) throw new Error('PIN ใหม่ต้องเป็นตัวเลข 4-8 หลัก');
+  const { error } = await supa.from('employees')
+    .update({ pin_hash: await hashPin(emp.emp_id, pin) }).eq('emp_id', emp.emp_id);
   if (error) throw new Error(error.message);
   return { ok: true };
 }
@@ -290,7 +366,7 @@ async function apiEmployees(b: any) {
   const emp = await auth(b.token);
   requireRole(emp, ['admin']);
   const [emps, quotas] = await Promise.all([
-    supa.from('employees').select('emp_id,name,dept,email,role,manager_id').order('emp_id'),
+    supa.from('employees').select('emp_id,name,dept,email,phone,role,manager_id').order('emp_id'),
     supa.from('quotas').select('*'),
   ]);
   if (emps.error) throw new Error(emps.error.message);
@@ -310,7 +386,7 @@ async function apiAddEmployee(b: any) {
   requireRole(emp, ['admin']);
   const v = await validateEmpInput(b, { requirePin: true });
   const { error } = await supa.from('employees').insert({
-    emp_id: v.id, name: v.name, dept: v.dept, email: v.email,
+    emp_id: v.id, name: v.name, dept: v.dept, email: v.email, phone: v.phone,
     pin_hash: await hashPin(v.id, v.pin), role: v.role, manager_id: v.managerId || null,
   });
   if (error) {
@@ -329,7 +405,7 @@ async function apiUpdateEmployee(b: any) {
   if (v.managerId === v.id) throw new Error('ตั้งตัวเองเป็นหัวหน้าของตัวเองไม่ได้');
   if (!await getEmp(v.id)) throw new Error('ไม่พบพนักงาน ' + v.id);
 
-  const values: Record<string, unknown> = { name: v.name, dept: v.dept, email: v.email, role: v.role, manager_id: v.managerId || null };
+  const values: Record<string, unknown> = { name: v.name, dept: v.dept, email: v.email, phone: v.phone, role: v.role, manager_id: v.managerId || null };
   if (v.pin) values.pin_hash = await hashPin(v.id, v.pin);
   const { error } = await supa.from('employees').update(values).eq('emp_id', v.id);
   if (error) throw new Error(error.message);
@@ -349,7 +425,9 @@ async function validateEmpInput(b: any, opt: { requirePin: boolean }) {
   if (managerId && !await getEmp(managerId)) throw new Error('ไม่พบรหัสหัวหน้า ' + managerId);
   const email = String(b.email ?? '').trim();
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
-  return { id, name, pin, role, managerId, email, dept: String(b.dept ?? '').trim() };
+  const phone = String(b.phone ?? '').trim();
+  if (phone && !/^[0-9+\-\s()]{5,20}$/.test(phone)) throw new Error('รูปแบบเบอร์โทรไม่ถูกต้อง');
+  return { id, name, pin, role, managerId, email, phone, dept: String(b.dept ?? '').trim() };
 }
 
 // สิทธิ์รายคน: ค่าว่าง = ล้าง override กลับไปใช้ค่ามาตรฐาน
@@ -436,9 +514,9 @@ async function notifyManager(emp: any, info: any) {
   const t = await signToken(`decide|${info.req_id}|${manager.emp_id}`, exp);
   const link = (d: string) => `${apiUrl()}?action=decide&r=${encodeURIComponent(info.req_id)}&d=${d}&t=${encodeURIComponent(t)}`;
   const btn = 'display:inline-block;padding:12px 28px;border-radius:8px;color:#fff;text-decoration:none;font-size:16px';
-  await sendEmail(manager.email, `[ใบลาใหม่] ${emp.name} — ${info.type_name} ${info.days} วัน`,
+  await sendEmail(manager.email, `[${info.edited ? 'แก้ไขใบลา' : 'ใบลาใหม่'}] ${emp.name} — ${info.type_name} ${info.days} วัน`,
     `<div style="font-family:sans-serif;max-width:480px">
-      <h2 style="margin:0 0 12px">ใบลารออนุมัติ</h2>
+      <h2 style="margin:0 0 12px">${info.edited ? 'ใบลาถูกแก้ไข — รออนุมัติ' : 'ใบลารออนุมัติ'}</h2>
       <p><b>${esc(emp.name)}</b> (${esc(emp.emp_id)}) ขอ<b>${esc(info.type_name)}</b><br>
       วันที่ ${info.start} ถึง ${info.end} รวม <b>${info.days} วันทำการ</b><br>
       เหตุผล: ${esc(info.reason || '-')}
@@ -447,6 +525,17 @@ async function notifyManager(emp: any, info: any) {
       <a href="${link('approved')}" style="${btn};background:#0F6E56">✓ อนุมัติ</a>&nbsp;&nbsp;
       <a href="${link('rejected')}" style="${btn};background:#A32D2D">✕ ไม่อนุมัติ</a></p>
       <p style="color:#888;font-size:13px">กดปุ่มแล้วยืนยันอีกครั้งในหน้าที่เปิดขึ้น (ไม่ต้อง login) หรือเข้าไปจัดการในเว็บที่แท็บ "อนุมัติ"</p></div>`);
+}
+
+async function notifyManagerCancelled(emp: any, row: any) {
+  if (!emp.manager_id) return;
+  const manager = await getEmp(emp.manager_id);
+  if (!manager?.email) return;
+  await sendEmail(manager.email, `[ยกเลิกใบลา] ${emp.name} — ${row.start_date} ถึง ${row.end_date}`,
+    `<div style="font-family:sans-serif;max-width:480px">
+      <h2 style="margin:0 0 12px">ใบลาที่อนุมัติแล้วถูกยกเลิก</h2>
+      <p><b>${esc(emp.name)}</b> (${esc(emp.emp_id)}) ยกเลิกใบลาวันที่ ${row.start_date} ถึง ${row.end_date}
+      (${row.days} วัน) — ระบบคืนวันลาให้แล้ว ไม่ต้องดำเนินการใด ๆ</p></div>`);
 }
 
 async function notifyEmployee(reqRow: any, decision: string, comment: string) {

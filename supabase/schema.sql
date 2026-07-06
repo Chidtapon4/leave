@@ -8,6 +8,7 @@ create table if not exists employees (
   name       text not null,
   dept       text not null default '',
   email      text not null default '',
+  phone      text not null default '',
   pin_hash   text not null,
   role       text not null default 'employee' check (role in ('employee','approver','admin')),
   manager_id text references employees(emp_id),

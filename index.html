@@ -34,7 +34,7 @@
   <header id="topbar" class="hidden">
     <span id="topbar-title">ยื่นใบลา</span>
     <div class="topbar-right">
-      <span id="topbar-user" class="muted"></span>
+      <button id="topbar-user" class="topbar-user" title="ข้อมูลของฉัน"></button>
       <button id="logout-btn" class="btn small" title="ออกจากระบบ">ออก</button>
     </div>
   </header>
@@ -46,7 +46,7 @@
       <div id="balance-cards" class="balance-grid"></div>
 
       <form id="leave-form" class="card">
-        <h2>ยื่นใบลา</h2>
+        <h2 id="leave-form-title">ยื่นใบลา</h2>
         <label>ประเภทการลา
           <select id="f-type" required></select>
         </label>
@@ -70,6 +70,27 @@
           <input id="f-file" type="file" accept="image/*,.pdf">
         </label>
         <button type="submit" class="btn primary full" id="f-submit">ส่งใบลา</button>
+        <button type="button" class="btn full hidden" id="f-cancel-edit" style="margin-top:8px">ยกเลิกการแก้ไข ไม่บันทึก</button>
+      </form>
+    </section>
+
+    <!-- ข้อมูลของฉัน + เปลี่ยน PIN -->
+    <section id="view-profile" class="view hidden">
+      <div class="card" id="profile-card"></div>
+      <form id="pin-form" class="card">
+        <h2>เปลี่ยน PIN</h2>
+        <label>PIN เดิม
+          <input id="p-old" type="password" inputmode="numeric" autocomplete="current-password" required>
+        </label>
+        <div class="row2">
+          <label>PIN ใหม่ (4-8 หลัก)
+            <input id="p-new" type="password" inputmode="numeric" pattern="\d{4,8}" autocomplete="new-password" required>
+          </label>
+          <label>ยืนยัน PIN ใหม่
+            <input id="p-new2" type="password" inputmode="numeric" autocomplete="new-password" required>
+          </label>
+        </div>
+        <button type="submit" class="btn primary full" id="p-submit">เปลี่ยน PIN</button>
       </form>
     </section>
 
@@ -140,9 +161,14 @@
             </select>
           </label>
         </div>
-        <label>อีเมล <small class="muted">(ใช้รับแจ้งเตือน เว้นว่างได้)</small>
-          <input id="e-email" type="email" placeholder="name@company.com">
-        </label>
+        <div class="row2">
+          <label>อีเมล <small class="muted">(รับแจ้งเตือน)</small>
+            <input id="e-email" type="email" placeholder="name@company.com">
+          </label>
+          <label>เบอร์โทร
+            <input id="e-phone" inputmode="tel" placeholder="08x-xxx-xxxx">
+          </label>
+        </div>
         <label>หัวหน้าผู้อนุมัติใบลาของคนนี้
           <select id="e-manager"><option value="">— ไม่ระบุ (admin อนุมัติแทน) —</option></select>
         </label>

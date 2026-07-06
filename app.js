@@ -12,14 +12,16 @@ const state = {
   balances: [],
   dashboard: null,
   staff: null,       // ข้อมูลจาก action 'employees' (รายชื่อ + สิทธิ์รายคน)
-  editingEmp: null,  // emp_id ที่กำลังแก้ไขในฟอร์ม (null = โหมดเพิ่มใหม่)
+  editingEmp: null,  // emp_id ที่กำลังแก้ไขในฟอร์มพนักงาน (null = โหมดเพิ่มใหม่)
+  myRequests: [],    // ประวัติใบลาของฉัน (ใช้ตอนกดแก้ไขใบลา)
+  editingReq: null,  // req_id ที่กำลังแก้ไขในฟอร์มยื่นลา (null = ยื่นใหม่)
   calMonth: null, // Date ต้นเดือนที่ปฏิทินแสดงอยู่
   workAllWeek: false, // true = นับวันลาทุกวัน ไม่ข้ามเสาร์-อาทิตย์/วันหยุด (ตั้งค่าที่ WORK_ALL_WEEK ใน Code.gs)
 };
 
 const STATUS_TH = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', cancelled: 'ยกเลิก' };
 const ROLE_TH = { employee: 'พนักงาน', approver: 'หัวหน้า', admin: 'HR/แอดมิน' };
-const VIEW_TITLE = { home: 'ยื่นใบลา', history: 'ประวัติการลา', approve: 'รออนุมัติ', dashboard: 'สรุปภาพรวม (HR)', staff: 'จัดการพนักงาน' };
+const VIEW_TITLE = { home: 'ยื่นใบลา', history: 'ประวัติการลา', approve: 'รออนุมัติ', dashboard: 'สรุปภาพรวม (HR)', staff: 'จัดการพนักงาน', profile: 'ข้อมูลของฉัน' };
 
 // ---------- เรียก API ----------
 
@@ -109,6 +111,7 @@ function switchView(name) {
   if (name === 'approve') loadPending();
   if (name === 'dashboard') loadDashboard();
   if (name === 'staff') loadStaff();
+  if (name === 'profile') renderProfile();
 }
 
 $$('.nav-btn').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
@@ -137,6 +140,48 @@ $('#login-form').addEventListener('submit', async (e) => {
 $('#logout-btn').addEventListener('click', () => {
   localStorage.removeItem('leave_token');
   location.reload();
+});
+
+// ---------- ข้อมูลของฉัน + เปลี่ยน PIN ----------
+
+$('#topbar-user').addEventListener('click', () => switchView('profile'));
+
+function renderProfile() {
+  const p = state.profile;
+  const initials = firstName(p.name).slice(0, 2);
+  const row = (label, val) => `<tr><td>${label}</td><td>${esc(val || '-')}</td></tr>`;
+  $('#profile-card').innerHTML = `
+    <div class="profile-head">
+      <div class="profile-avatar">${esc(initials)}</div>
+      <div>
+        <div style="font-weight:600">${esc(p.name)}</div>
+        <span class="badge ${p.role === 'admin' ? 'approved' : p.role === 'approver' ? 'pending' : 'cancelled'}">${ROLE_TH[p.role] || esc(p.role)}</span>
+      </div>
+    </div>
+    <table class="profile-rows">
+      ${row('รหัสพนักงาน', p.emp_id)}
+      ${row('แผนก', p.dept)}
+      ${row('อีเมล', p.email)}
+      ${row('เบอร์โทร', p.phone)}
+      ${row('หัวหน้าผู้อนุมัติ', p.manager_name || (p.manager_id ? p.manager_id : 'ไม่ระบุ (admin อนุมัติแทน)'))}
+    </table>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">ข้อมูลไม่ถูกต้อง แจ้ง HR/แอดมินให้แก้ไขได้</p>`;
+}
+
+$('#pin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if ($('#p-new').value !== $('#p-new2').value) return toast('PIN ใหม่สองช่องไม่ตรงกัน', true);
+  const btn = $('#p-submit');
+  btn.disabled = true;
+  try {
+    await api('changePin', { old_pin: $('#p-old').value, new_pin: $('#p-new').value });
+    toast('เปลี่ยน PIN เรียบร้อย ใช้ PIN ใหม่ในการ login ครั้งถัดไป ✓');
+    $('#pin-form').reset();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // ---------- หน้าหลัก: วันลาคงเหลือ + ฟอร์ม ----------
@@ -207,10 +252,12 @@ $('#leave-form').addEventListener('submit', async (e) => {
     file = { name: f.name, mime: f.type, data: await toBase64(f) };
   }
 
+  const editing = state.editingReq;
   const btn = $('#f-submit');
   btn.disabled = true;
   try {
-    const res = await api('submit', {
+    const res = await api(editing ? 'updateRequest' : 'submit', {
+      req_id: editing || undefined,
       type_id: $('#f-type').value,
       start: $('#f-start').value,
       end: $('#f-end').value,
@@ -218,10 +265,10 @@ $('#leave-form').addEventListener('submit', async (e) => {
       reason: $('#f-reason').value.trim(),
       file,
     });
-    toast(`ส่งใบลาเรียบร้อย (${fmtNum(res.days)} วัน) รอหัวหน้าอนุมัติ ✓`);
-    $('#f-reason').value = '';
-    $('#f-file').value = '';
-    initFormDates();
+    toast(editing
+      ? `แก้ไขใบลาเรียบร้อย (${fmtNum(res.days)} วัน) รอหัวหน้าอนุมัติ ✓`
+      : `ส่งใบลาเรียบร้อย (${fmtNum(res.days)} วัน) รอหัวหน้าอนุมัติ ✓`);
+    resetLeaveForm();
     applyBundle(await api('me', {}, true));
     renderBalances();
     switchView('history');
@@ -230,6 +277,44 @@ $('#leave-form').addEventListener('submit', async (e) => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// โหมดแก้ไขใบลา (กรณีลาผิดวัน) — ใช้ฟอร์มยื่นลาเดิม เติมข้อมูลใบเก่าให้
+function editReq(reqId) {
+  const r = state.myRequests.find((x) => x.req_id === reqId);
+  if (!r || r.status !== 'pending') return;
+  state.editingReq = reqId;
+  switchView('home');
+  $('#f-type').value = r.type_id;
+  $('#f-start').value = r.start_date;
+  $('#f-end').value = r.end_date;
+  onDatesChange();
+  if (r.half_day && r.start_date === r.end_date) {
+    $('#f-half').checked = true;
+    onDatesChange();
+  }
+  $('#f-reason').value = r.reason || '';
+  $('#f-file').value = '';
+  $('#leave-form-title').textContent = 'แก้ไขใบลา (รออนุมัติ)';
+  $('#f-submit').textContent = 'บันทึกการแก้ไข';
+  $('#f-cancel-edit').classList.remove('hidden');
+  $('#leave-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+function resetLeaveForm() {
+  state.editingReq = null;
+  $('#f-reason').value = '';
+  $('#f-file').value = '';
+  $('#f-half').checked = false;
+  initFormDates();
+  $('#leave-form-title').textContent = 'ยื่นใบลา';
+  $('#f-submit').textContent = 'ส่งใบลา';
+  $('#f-cancel-edit').classList.add('hidden');
+}
+
+$('#f-cancel-edit').addEventListener('click', () => {
+  resetLeaveForm();
+  switchView('history');
 });
 
 function toBase64(file) {
@@ -248,11 +333,17 @@ async function loadHistory() {
   box.innerHTML = '<div class="empty">กำลังโหลด…</div>';
   try {
     const res = await api('myRequests', {}, true);
+    state.myRequests = res.requests;
     if (!res.requests.length) {
       box.innerHTML = '<div class="empty">ยังไม่มีประวัติการลา</div>';
       return;
     }
-    box.innerHTML = res.requests.map((r) => `
+    const today = fmtDate(new Date());
+    box.innerHTML = res.requests.map((r) => {
+      const canEdit = r.status === 'pending';
+      // ยกเลิกได้: รออนุมัติ หรืออนุมัติแล้วแต่ยังไม่ถึงวันเริ่มลา
+      const canCancel = r.status === 'pending' || (r.status === 'approved' && r.start_date > today);
+      return `
       <div class="req-card">
         <div class="req-top">
           <span class="req-title">${esc(typeName(r.type_id))} · ${fmtNum(r.days)} วัน</span>
@@ -264,18 +355,24 @@ async function loadHistory() {
           ${r.file_url ? `<br><a href="${esc(r.file_url)}" target="_blank" rel="noopener">📎 ไฟล์แนบ</a>` : ''}
           ${r.comment ? `<br>หมายเหตุผู้อนุมัติ: ${esc(r.comment)}` : ''}
         </div>
-        ${r.status === 'pending' ? `
+        ${canEdit || canCancel ? `
         <div class="req-actions">
-          <button class="btn danger" onclick="cancelReq('${esc(r.req_id)}')">ยกเลิกใบลา</button>
+          ${canEdit ? `<button class="btn" onclick="editReq('${esc(r.req_id)}')">✏️ แก้ไข</button>` : ''}
+          ${canCancel ? `<button class="btn danger" onclick="cancelReq('${esc(r.req_id)}')">ยกเลิกใบลา</button>` : ''}
         </div>` : ''}
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch (err) {
     box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
   }
 }
 
 async function cancelReq(reqId) {
-  if (!confirm('ยืนยันยกเลิกใบลานี้?')) return;
+  const r = state.myRequests.find((x) => x.req_id === reqId);
+  const msg = r && r.status === 'approved'
+    ? 'ใบลานี้อนุมัติแล้ว ยืนยันยกเลิก? ระบบจะคืนวันลาและแจ้งหัวหน้าให้ทราบ'
+    : 'ยืนยันยกเลิกใบลานี้?';
+  if (!confirm(msg)) return;
   try {
     await api('cancel', { req_id: reqId });
     toast('ยกเลิกใบลาแล้ว');
@@ -447,7 +544,7 @@ function renderStaffList(res) {
           <span class="badge ${badge[e.role] || 'cancelled'}">${ROLE_TH[e.role] || esc(e.role)}</span>
         </div>
         <div class="req-meta">
-          ${esc(e.emp_id)}${e.dept ? ' · ' + esc(e.dept) : ''}${e.email ? ' · ' + esc(e.email) : ''}<br>
+          ${esc(e.emp_id)}${e.dept ? ' · ' + esc(e.dept) : ''}${e.email ? ' · ' + esc(e.email) : ''}${e.phone ? ' · 📞 ' + esc(e.phone) : ''}<br>
           หัวหน้า: ${mgr ? esc(mgr.name) : '<i>ไม่ระบุ (admin อนุมัติแทน)</i>'}${quotaNote}
         </div>
         <div class="req-actions">
@@ -488,6 +585,7 @@ function editEmp(empId) {
   $('#e-name').value = e.name;
   $('#e-dept').value = e.dept || '';
   $('#e-email').value = e.email || '';
+  $('#e-phone').value = e.phone || '';
   $('#e-role').value = e.role || 'employee';
   $('#e-manager').value = e.manager_id || '';
   $$('#e-quotas [data-quota]').forEach((inp) => {
@@ -526,6 +624,7 @@ $('#emp-form').addEventListener('submit', async (e) => {
       name: $('#e-name').value.trim(),
       dept: $('#e-dept').value.trim(),
       email: $('#e-email').value.trim(),
+      phone: $('#e-phone').value.trim(),
       pin: $('#e-pin').value,
       role: $('#e-role').value,
       manager_id: $('#e-manager').value,
