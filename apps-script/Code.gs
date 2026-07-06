@@ -4,7 +4,7 @@
  * วางไฟล์นี้ > รัน setup() หนึ่งครั้ง > Deploy เป็น Web app)
  */
 
-const SHEET = { EMP: 'Employees', REQ: 'LeaveRequests', TYPE: 'LeaveTypes', HOL: 'Holidays' };
+const SHEET = { EMP: 'Employees', REQ: 'LeaveRequests', TYPE: 'LeaveTypes', HOL: 'Holidays', QUOTA: 'Quotas' };
 const TZ = 'Asia/Bangkok';
 const TOKEN_HOURS = 12;      // อายุ token หลัง login
 const DECIDE_LINK_DAYS = 7;  // อายุลิงก์อนุมัติในอีเมล
@@ -28,6 +28,8 @@ function doPost(e) {
       decide: apiDecide_,
       dashboard: apiDashboard_,
       addEmployee: apiAddEmployee_,
+      employees: apiEmployees_,
+      updateEmployee: apiUpdateEmployee_,
     };
     const fn = handlers[req.action];
     if (!fn) throw new Error('ไม่รู้จักคำสั่ง: ' + req.action);
@@ -155,6 +157,9 @@ function setup() {
     ['req_id', 'created_at', 'emp_id', 'emp_name', 'type_id', 'start_date', 'end_date',
      'half_day', 'days', 'reason', 'file_url', 'status', 'approver_id', 'decided_at', 'comment'],
     []);
+
+  // สิทธิ์วันลารายคน (override ค่ามาตรฐานใน LeaveTypes) — จัดการผ่านแท็บ "พนักงาน" ในเว็บ
+  ensureSheet_(SHEET.QUOTA, ['emp_id', 'type_id', 'quota_days'], []);
 
   Logger.log('ติดตั้งเสร็จแล้ว! อย่าลืม: 1) แก้ข้อมูลพนักงานในแท็บ Employees ให้เป็นของจริง'
     + ' 2) เปลี่ยน PIN ด้วยฟังก์ชัน setPin 3) Deploy เป็น Web app');
@@ -297,7 +302,7 @@ function apiCancel_(req) {
     const found = findReq_(req.req_id);
     if (!found || found.obj.emp_id !== emp.emp_id) throw new Error('ไม่พบใบลา');
     if (found.obj.status !== 'pending') throw new Error('ยกเลิกได้เฉพาะใบลาที่รออนุมัติ');
-    setReqCells_(found.row, { status: 'cancelled', decided_at: now_() });
+    setCells_(SHEET.REQ, found.row, { status: 'cancelled', decided_at: now_() });
     return { ok: true };
   } finally {
     lock.releaseLock();
@@ -340,7 +345,7 @@ function decide_(reqId, decision, approverId, comment) {
     const found = findReq_(reqId);
     if (!found) throw new Error('ไม่พบใบลา ' + reqId);
     if (found.obj.status !== 'pending') throw new Error('ใบลานี้ถูกดำเนินการไปแล้ว (สถานะ: ' + statusTh_(found.obj.status) + ')');
-    setReqCells_(found.row, { status: decision, approver_id: approverId, decided_at: now_(), comment: comment });
+    setCells_(SHEET.REQ, found.row, { status: decision, approver_id: approverId, decided_at: now_(), comment: comment });
     notifyEmployee_(found.obj, decision, comment);
   } finally {
     lock.releaseLock();
@@ -371,10 +376,90 @@ function apiAddEmployee_(req) {
     if (managerId && !findEmp_(managerId)) throw new Error('ไม่พบรหัสหัวหน้า ' + managerId);
     ss_().getSheetByName(SHEET.EMP)
       .appendRow([id, name, String(req.dept || '').trim(), email, hashPin_(id, pin), role, managerId]);
+    saveQuotas_(id, req.quotas);
     return { ok: true, emp_id: id };
   } finally {
     lock.releaseLock();
   }
+}
+
+function apiEmployees_(req) {
+  const emp = auth_(req.token);
+  requireRole_(emp, ['admin']);
+  const overrides = quotaOverrides_();
+  return {
+    ok: true,
+    types: rows_(SHEET.TYPE),
+    employees: rows_(SHEET.EMP).map(e => {
+      const id = String(e.emp_id).trim();
+      return { emp_id: id, name: e.name, dept: e.dept, email: e.email,
+        role: e.role, manager_id: String(e.manager_id || '').trim(), quotas: overrides[id] || {} };
+    }),
+  };
+}
+
+function apiUpdateEmployee_(req) {
+  const emp = auth_(req.token);
+  requireRole_(emp, ['admin']);
+
+  const id = String(req.emp_id || '').trim().toUpperCase();
+  const name = String(req.name || '').trim();
+  if (!name) throw new Error('กรุณาใส่ชื่อ-สกุล');
+  const pin = String(req.pin || '');
+  if (pin && !/^\d{4,8}$/.test(pin)) throw new Error('PIN ต้องเป็นตัวเลข 4-8 หลัก');
+  const role = ['employee', 'approver', 'admin'].indexOf(req.role) > -1 ? req.role : 'employee';
+  if (id === emp.emp_id && role !== 'admin') throw new Error('ลดสิทธิ์บัญชีของตัวเองไม่ได้ (กันระบบไม่มี admin)');
+  const managerId = String(req.manager_id || '').trim().toUpperCase();
+  if (managerId === id) throw new Error('ตั้งตัวเองเป็นหัวหน้าของตัวเองไม่ได้');
+  const email = String(req.email || '').trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const found = findEmpRow_(id);
+    if (!found) throw new Error('ไม่พบพนักงาน ' + id);
+    if (managerId && !findEmp_(managerId)) throw new Error('ไม่พบรหัสหัวหน้า ' + managerId);
+    const values = { name: name, dept: String(req.dept || '').trim(), email: email, role: role, manager_id: managerId };
+    if (pin) values.pin_hash = hashPin_(id, pin);
+    setCells_(SHEET.EMP, found.row, values);
+    saveQuotas_(id, req.quotas);
+    return { ok: true, emp_id: id };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// บันทึกสิทธิ์รายคน: ค่าว่าง = ล้าง override กลับไปใช้ค่ามาตรฐาน
+function saveQuotas_(empId, quotas) {
+  if (!quotas) return;
+  const sh = quotaSheet_();
+  const data = sh.getDataRange().getValues();
+  Object.keys(quotas).forEach(typeId => {
+    const raw = String(quotas[typeId]).trim();
+    if (raw !== '' && (isNaN(Number(raw)) || Number(raw) < 0)) {
+      throw new Error('สิทธิ์วันลาต้องเป็นตัวเลข 0 ขึ้นไป');
+    }
+    let row = 0;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === empId && String(data[i][1]) === typeId) { row = i + 1; break; }
+    }
+    if (row) {
+      sh.getRange(row, 3).setValue(raw === '' ? '' : Number(raw));
+    } else if (raw !== '') {
+      sh.appendRow([empId, typeId, Number(raw)]);
+    }
+  });
+}
+
+function quotaSheet_() {
+  let sh = ss_().getSheetByName(SHEET.QUOTA);
+  if (!sh) {
+    sh = ss_().insertSheet(SHEET.QUOTA);
+    sh.getRange(1, 1, 1, 3).setValues([['emp_id', 'type_id', 'quota_days']]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
 }
 
 // ---------- API: dashboard (HR/admin) ----------
@@ -436,13 +521,26 @@ function countDays_(startStr, endStr, halfDay, holidayMap) {
 function balances_(empId) {
   const year = Utilities.formatDate(new Date(), TZ, 'yyyy');
   const mine = reqs_().filter(r => r.emp_id === empId && String(r.start_date).slice(0, 4) === year);
+  const overrides = quotaOverrides_()[empId] || {};
   return rows_(SHEET.TYPE).map(t => {
     const used = sum_(mine.filter(r => r.type_id === t.type_id && r.status === 'approved').map(r => Number(r.days) || 0));
     const pending = sum_(mine.filter(r => r.type_id === t.type_id && r.status === 'pending').map(r => Number(r.days) || 0));
-    const quota = t.quota_days === '' || t.quota_days === null ? null : Number(t.quota_days);
+    const base = t.quota_days === '' || t.quota_days === null ? null : Number(t.quota_days);
+    const quota = overrides.hasOwnProperty(t.type_id) ? overrides[t.type_id] : base;
     return { type_id: t.type_id, name: t.name, quota: quota, used: used, pending: pending,
       remaining: quota === null ? null : quota - used - pending };
   });
+}
+
+// สิทธิ์รายคนจากแท็บ Quotas: { EMP001: { VAC: 10, ... }, ... } (แถวที่ค่าว่าง = ไม่ override)
+function quotaOverrides_() {
+  const map = {};
+  rows_(SHEET.QUOTA).forEach(q => {
+    if (q.quota_days === '' || q.quota_days === null) return;
+    const id = String(q.emp_id).trim();
+    (map[id] = map[id] || {})[q.type_id] = Number(q.quota_days);
+  });
+  return map;
 }
 
 // ---------- อีเมลแจ้งเตือน ----------
@@ -542,13 +640,22 @@ function findReq_(reqId) {
   return null;
 }
 
-function setReqCells_(row, values) {
-  const sh = ss_().getSheetByName(SHEET.REQ);
+function setCells_(sheetName, row, values) {
+  const sh = ss_().getSheetByName(sheetName);
   const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   Object.keys(values).forEach(k => {
     const col = head.indexOf(k) + 1;
     if (col > 0) sh.getRange(row, col).setValue(values[k]);
   });
+}
+
+function findEmpRow_(empId) {
+  const sh = ss_().getSheetByName(SHEET.EMP);
+  const v = sh.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim() === empId) return { row: i + 1 };
+  }
+  return null;
 }
 
 function requireRole_(emp, roles) {

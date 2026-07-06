@@ -11,12 +11,15 @@ const state = {
   holidays: new Set(),
   balances: [],
   dashboard: null,
+  staff: null,       // ข้อมูลจาก action 'employees' (รายชื่อ + สิทธิ์รายคน)
+  editingEmp: null,  // emp_id ที่กำลังแก้ไขในฟอร์ม (null = โหมดเพิ่มใหม่)
   calMonth: null, // Date ต้นเดือนที่ปฏิทินแสดงอยู่
   workAllWeek: false, // true = นับวันลาทุกวัน ไม่ข้ามเสาร์-อาทิตย์/วันหยุด (ตั้งค่าที่ WORK_ALL_WEEK ใน Code.gs)
 };
 
 const STATUS_TH = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', cancelled: 'ยกเลิก' };
-const VIEW_TITLE = { home: 'ยื่นใบลา', history: 'ประวัติการลา', approve: 'รออนุมัติ', dashboard: 'สรุปภาพรวม (HR)' };
+const ROLE_TH = { employee: 'พนักงาน', approver: 'หัวหน้า', admin: 'HR/แอดมิน' };
+const VIEW_TITLE = { home: 'ยื่นใบลา', history: 'ประวัติการลา', approve: 'รออนุมัติ', dashboard: 'สรุปภาพรวม (HR)', staff: 'จัดการพนักงาน' };
 
 // ---------- เรียก API ----------
 
@@ -84,7 +87,10 @@ function showApp() {
 
   const role = state.profile.role;
   if (role === 'approver' || role === 'admin') $('[data-view="approve"]').classList.remove('hidden');
-  if (role === 'admin') $('[data-view="dashboard"]').classList.remove('hidden');
+  if (role === 'admin') {
+    $('[data-view="dashboard"]').classList.remove('hidden');
+    $('[data-view="staff"]').classList.remove('hidden');
+  }
 
   renderBalances();
   renderTypeOptions();
@@ -102,6 +108,7 @@ function switchView(name) {
   if (name === 'history') loadHistory();
   if (name === 'approve') loadPending();
   if (name === 'dashboard') loadDashboard();
+  if (name === 'staff') loadStaff();
 }
 
 $$('.nav-btn').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
@@ -340,7 +347,6 @@ async function loadDashboard() {
     renderUsage(res);
     renderCalendar();
     renderDashTable(res);
-    renderManagerOptions(res);
   } catch (err) {
     toast(err.message, true);
   }
@@ -409,39 +415,135 @@ function renderDashTable(res) {
   $('#dash-table').innerHTML = head + rows;
 }
 
-// ---------- เพิ่มพนักงาน (HR/admin) ----------
+// ---------- จัดการพนักงาน (HR/admin) ----------
+
+async function loadStaff() {
+  const box = $('#staff-list');
+  box.innerHTML = '<div class="empty">กำลังโหลด…</div>';
+  try {
+    const res = await api('employees', {}, true);
+    state.staff = res;
+    renderStaffList(res);
+    renderManagerOptions(res);
+    renderQuotaInputs(res.types);
+    resetEmpForm();
+  } catch (err) {
+    box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderStaffList(res) {
+  const badge = { employee: 'cancelled', approver: 'pending', admin: 'approved' };
+  $('#staff-list').innerHTML = res.employees.map((e) => {
+    const mgr = res.employees.find((x) => x.emp_id === e.manager_id);
+    const quotaNote = Object.keys(e.quotas).length
+      ? `<br><span style="color:var(--primary)">มีสิทธิ์วันลาเฉพาะคน: ${Object.keys(e.quotas)
+          .map((tid) => `${esc(typeNameOf(res.types, tid))} ${fmtNum(e.quotas[tid])} วัน`).join(', ')}</span>`
+      : '';
+    return `
+      <div class="req-card">
+        <div class="req-top">
+          <span class="req-title">${esc(e.name)}</span>
+          <span class="badge ${badge[e.role] || 'cancelled'}">${ROLE_TH[e.role] || esc(e.role)}</span>
+        </div>
+        <div class="req-meta">
+          ${esc(e.emp_id)}${e.dept ? ' · ' + esc(e.dept) : ''}${e.email ? ' · ' + esc(e.email) : ''}<br>
+          หัวหน้า: ${mgr ? esc(mgr.name) : '<i>ไม่ระบุ (admin อนุมัติแทน)</i>'}${quotaNote}
+        </div>
+        <div class="req-actions">
+          <button type="button" class="btn" onclick="editEmp('${esc(e.emp_id)}')">✏️ แก้ไข</button>
+        </div>
+      </div>`;
+  }).join('');
+}
 
 function renderManagerOptions(res) {
-  const sel = $('#e-manager');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">— ไม่ระบุ (admin อนุมัติแทน) —</option>'
+  $('#e-manager').innerHTML = '<option value="">— ไม่ระบุ (admin อนุมัติแทน) —</option>'
     + res.employees.map((e) => `<option value="${esc(e.emp_id)}">${esc(e.name)} (${esc(e.emp_id)})</option>`).join('');
-  sel.value = current;
 }
+
+function renderQuotaInputs(types) {
+  const quotaTypes = types.filter((t) => t.quota_days !== '' && t.quota_days !== null);
+  $('#e-quotas').innerHTML = `
+    <p class="muted" style="font-size:13px;margin:4px 0 8px">สิทธิ์วันลาต่อปีเฉพาะคนนี้ — เว้นว่าง = ใช้ค่ามาตรฐานของบริษัท</p>
+    <div class="row2">
+      ${quotaTypes.map((t) => `
+        <label>${esc(t.name)}
+          <input type="number" min="0" step="0.5" data-quota="${esc(t.type_id)}" placeholder="มาตรฐาน ${fmtNum(t.quota_days)}">
+        </label>`).join('')}
+    </div>`;
+}
+
+function editEmp(empId) {
+  const e = state.staff.employees.find((x) => x.emp_id === empId);
+  if (!e) return;
+  state.editingEmp = empId;
+  $('#emp-form-title').textContent = 'แก้ไข: ' + e.name;
+  $('#e-id').value = e.emp_id;
+  $('#e-id').disabled = true;
+  $('#e-pin').required = false;
+  $('#e-pin').value = '';
+  $('#e-pin').placeholder = 'เว้นว่าง = ใช้ PIN เดิม';
+  $('#e-pin-label').firstChild.textContent = 'ตั้ง PIN ใหม่ ';
+  $('#e-name').value = e.name;
+  $('#e-dept').value = e.dept || '';
+  $('#e-email').value = e.email || '';
+  $('#e-role').value = e.role || 'employee';
+  $('#e-manager').value = e.manager_id || '';
+  $$('#e-quotas [data-quota]').forEach((inp) => {
+    const v = e.quotas[inp.dataset.quota];
+    inp.value = v == null ? '' : v;
+  });
+  $('#e-submit').textContent = 'บันทึกการแก้ไข';
+  $('#e-cancel').classList.remove('hidden');
+  $('#emp-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+function resetEmpForm() {
+  state.editingEmp = null;
+  $('#emp-form').reset();
+  $('#emp-form-title').textContent = 'เพิ่มพนักงานใหม่';
+  $('#e-id').disabled = false;
+  $('#e-pin').required = true;
+  $('#e-pin').placeholder = 'เช่น 1234';
+  $('#e-pin-label').firstChild.textContent = 'PIN (ตัวเลข 4-8 หลัก) ';
+  $('#e-submit').textContent = 'เพิ่มพนักงาน';
+  $('#e-cancel').classList.add('hidden');
+}
+
+$('#e-cancel').addEventListener('click', resetEmpForm);
 
 $('#emp-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const quotas = {};
+  $$('#e-quotas [data-quota]').forEach((inp) => { quotas[inp.dataset.quota] = inp.value.trim(); });
+  const editing = state.editingEmp;
   const btn = $('#e-submit');
   btn.disabled = true;
   try {
-    const res = await api('addEmployee', {
-      emp_id: $('#e-id').value.trim(),
+    const res = await api(editing ? 'updateEmployee' : 'addEmployee', {
+      emp_id: editing || $('#e-id').value.trim(),
       name: $('#e-name').value.trim(),
       dept: $('#e-dept').value.trim(),
       email: $('#e-email').value.trim(),
       pin: $('#e-pin').value,
       role: $('#e-role').value,
       manager_id: $('#e-manager').value,
+      quotas,
     });
-    toast(`เพิ่มพนักงาน ${res.emp_id} เรียบร้อย ✓`);
-    $('#emp-form').reset();
-    loadDashboard();
+    toast(editing ? `บันทึกข้อมูล ${res.emp_id} เรียบร้อย ✓` : `เพิ่มพนักงาน ${res.emp_id} เรียบร้อย ✓`);
+    loadStaff();
   } catch (err) {
     toast(err.message, true);
   } finally {
     btn.disabled = false;
   }
 });
+
+function typeNameOf(types, typeId) {
+  const t = types.find((x) => x.type_id === typeId);
+  return t ? t.name : typeId;
+}
 
 // ---------- ตัวช่วย ----------
 

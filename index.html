@@ -106,14 +106,22 @@
         <h2>วันลาคงเหลือรายคน</h2>
         <div class="table-scroll"><table id="dash-table"></table></div>
       </div>
+    </section>
+
+    <!-- จัดการพนักงาน (admin) -->
+    <section id="view-staff" class="view hidden">
+      <div class="card">
+        <h2>รายชื่อพนักงาน</h2>
+        <div id="staff-list" class="list"></div>
+      </div>
 
       <form id="emp-form" class="card">
-        <h2>เพิ่มพนักงานใหม่</h2>
+        <h2 id="emp-form-title">เพิ่มพนักงานใหม่</h2>
         <div class="row2">
           <label>รหัสพนักงาน
             <input id="e-id" required placeholder="เช่น EMP011">
           </label>
-          <label>PIN (ตัวเลข 4-8 หลัก)
+          <label id="e-pin-label">PIN (ตัวเลข 4-8 หลัก)
             <input id="e-pin" required inputmode="numeric" pattern="\d{4,8}" placeholder="เช่น 1234">
           </label>
         </div>
@@ -138,7 +146,9 @@
         <label>หัวหน้าผู้อนุมัติใบลาของคนนี้
           <select id="e-manager"><option value="">— ไม่ระบุ (admin อนุมัติแทน) —</option></select>
         </label>
+        <div id="e-quotas"></div>
         <button type="submit" class="btn primary full" id="e-submit">เพิ่มพนักงาน</button>
+        <button type="button" class="btn full hidden" id="e-cancel" style="margin-top:8px">ยกเลิกการแก้ไข</button>
       </form>
     </section>
 
@@ -149,6 +159,7 @@
     <button data-view="history" class="nav-btn"><span>🕘</span>ประวัติ</button>
     <button data-view="approve" class="nav-btn hidden"><span>✅</span>อนุมัติ</button>
     <button data-view="dashboard" class="nav-btn hidden"><span>📊</span>สรุป</button>
+    <button data-view="staff" class="nav-btn hidden"><span>👥</span>พนักงาน</button>
   </nav>
 
   <div id="toast" class="toast hidden"></div>
