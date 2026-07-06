@@ -2,13 +2,17 @@
 
 เว็บแอปแจ้งลางานสำหรับองค์กรเล็ก-กลาง ใช้งานผ่านมือถือเป็นหลัก (รองรับ PC)
 
-| ส่วน | เทคโนโลยี | ค่าใช้จ่าย |
+รองรับ backend 2 แบบ (หน้าเว็บชุดเดียวกัน สลับได้ที่ `config.js`):
+
+| ส่วน | แบบ Google (เริ่มต้นง่าย) | แบบ Supabase (รองรับโต) |
 |---|---|---|
-| หน้าเว็บ | GitHub Pages (HTML/CSS/JS ล้วน ไม่มี framework) | ฟรี |
-| API | Google Apps Script Web App | ฟรี |
-| ฐานข้อมูล | Google Sheets | ฟรี |
-| ไฟล์แนบ (ใบรับรองแพทย์) | Google Drive | ฟรี |
-| แจ้งเตือน | อีเมล (Gmail ~100 ฉบับ/วัน) | ฟรี |
+| หน้าเว็บ | GitHub Pages หรือ Cloudflare Pages/Workers | เหมือนกัน |
+| API | Google Apps Script ([apps-script/Code.gs](apps-script/Code.gs)) | Edge Function ([supabase/functions/api/index.ts](supabase/functions/api/index.ts)) |
+| ฐานข้อมูล | Google Sheets | PostgreSQL ([supabase/schema.sql](supabase/schema.sql)) |
+| ไฟล์แนบ | Google Drive | Supabase Storage |
+| แจ้งเตือนอีเมล | Gmail (~100 ฉบับ/วัน) | Brevo (~300 ฉบับ/วัน, optional) |
+
+ติดตั้งแบบ Google: อ่านต่อด้านล่าง · ย้าย/ติดตั้งแบบ Supabase: [MIGRATE-SUPABASE.md](MIGRATE-SUPABASE.md)
 
 ## ฟีเจอร์
 
