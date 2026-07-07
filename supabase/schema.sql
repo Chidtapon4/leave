@@ -79,10 +79,11 @@ on conflict (id) do nothing;
 
 -- ---------- ข้อมูลเริ่มต้น ----------
 
-insert into settings (key, value) values ('work_all_week', 'true')
+insert into settings (key, value) values
+  ('work_all_week', 'true'),        -- true = นับวันลาทุกวัน / false = ข้ามเสาร์-อาทิตย์+วันหยุด
+  ('alert_pending_days', '3'),      -- ใบลาค้างเกินกี่วันให้เตือนใน dashboard
+  ('alert_clash_people', '3')       -- ลาพร้อมกันกี่คนขึ้นไปให้เตือนใน dashboard
 on conflict (key) do nothing;
--- 'true'  = นับวันลาทุกวันรวมเสาร์-อาทิตย์และวันหยุด
--- 'false' = ข้ามเสาร์-อาทิตย์และวันหยุดในตาราง holidays
 
 insert into leave_types (type_id, name, quota_days, sort) values
   ('VAC',  'ลาพักร้อน', 6,  1),

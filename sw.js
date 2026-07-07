@@ -1,6 +1,6 @@
 /* service worker: network-first เพื่อให้ได้ไฟล์เวอร์ชันล่าสุดเสมอ
    และ fallback เป็น cache เมื่อออฟไลน์ */
-const CACHE = 'leave-app-v1';
+const CACHE = 'leave-app-v2';
 const SHELL = ['.', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {

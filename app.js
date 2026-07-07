@@ -85,7 +85,8 @@ function showApp() {
   $('#topbar').classList.remove('hidden');
   $('#main').classList.remove('hidden');
   $('#bottomnav').classList.remove('hidden');
-  $('#topbar-user').textContent = state.profile.name;
+  $('#topbar-user').textContent = firstName(state.profile.name).slice(0, 2);
+  $('#topbar-date').textContent = new Date().toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' });
 
   const role = state.profile.role;
   if (role === 'approver' || role === 'admin') $('[data-view="approve"]').classList.remove('hidden');
@@ -106,7 +107,9 @@ function switchView(name) {
   $$('.view').forEach((v) => v.classList.add('hidden'));
   $('#view-' + name).classList.remove('hidden');
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
-  $('#topbar-title').textContent = VIEW_TITLE[name];
+  $('#topbar-title').textContent = name === 'home'
+    ? 'สวัสดี, ' + firstName(state.profile.name)
+    : VIEW_TITLE[name];
   if (name === 'history') loadHistory();
   if (name === 'approve') loadPending();
   if (name === 'dashboard') loadDashboard();
@@ -189,12 +192,16 @@ $('#pin-form').addEventListener('submit', async (e) => {
 function renderBalances() {
   $('#balance-cards').innerHTML = state.balances
     .filter((b) => b.quota !== null)
-    .map((b) => `
+    .map((b) => {
+      const pct = b.quota > 0 ? Math.max(0, Math.min(100, (b.remaining / b.quota) * 100)) : 0;
+      return `
       <div class="balance-card">
         <div class="b-name">${esc(b.name)}</div>
         <div class="b-num">${fmtNum(b.remaining)}</div>
         <div class="b-sub">เหลือจาก ${fmtNum(b.quota)} วัน${b.pending ? ` · รอ ${fmtNum(b.pending)}` : ''}</div>
-      </div>`).join('');
+        <div class="b-bar"><div class="b-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
 }
 
 function renderTypeOptions() {
@@ -440,34 +447,78 @@ async function loadDashboard() {
       const now = new Date();
       state.calMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     }
+    renderHoliday(res);
+    renderAlerts(res);
     renderDashStats(res);
-    renderUsage(res);
+    renderTrend(res);
     renderCalendar();
+    renderUpcoming(res);
     renderDashTable(res);
   } catch (err) {
     toast(err.message, true);
   }
 }
 
-function renderDashStats(res) {
-  const onLeave = res.stats.onLeaveToday;
-  $('#dash-stats').innerHTML = `
-    <div class="stat-card"><div class="s-num">${res.stats.pending}</div><div class="s-label">รออนุมัติ</div></div>
-    <div class="stat-card" title="${esc(onLeave.join(', '))}"><div class="s-num">${onLeave.length}</div><div class="s-label">ลาวันนี้${onLeave.length ? '<br>' + esc(onLeave.map(firstName).join(', ')) : ''}</div></div>
-    <div class="stat-card"><div class="s-num">${fmtNum(res.stats.usedTotal)}</div><div class="s-label">วันลาที่ใช้ปีนี้ (รวม)</div></div>`;
+function renderHoliday(res) {
+  const el = $('#dash-holiday');
+  if (!res.next_holiday) return el.classList.add('hidden');
+  const h = res.next_holiday;
+  el.textContent = `📅 วันหยุดถัดไป · ${h.name} (${fmtThai(h.date)}) — อีก ${h.days_until} วัน`;
+  el.classList.remove('hidden');
 }
 
-function renderUsage(res) {
-  const max = Math.max(1, ...res.typeUsage.map((t) => t.used));
-  $('#dash-usage').innerHTML = res.typeUsage.map((t) => `
-    <div class="usage-row">
-      <div class="usage-label"><span>${esc(t.name)}</span><span>${fmtNum(t.used)} วัน</span></div>
-      <div class="usage-bar"><div class="usage-fill" style="width:${(t.used / max) * 100}%"></div></div>
-    </div>`).join('');
+function renderAlerts(res) {
+  let html = '';
+  (res.clashes || []).forEach((c) => {
+    html += `
+    <div class="alert-card hot">
+      <p class="alert-title">⚠️ ${fmtThai(c.date)} — คนลาพร้อมกัน ${c.count} คน</p>
+      <p class="alert-sub">${esc(c.names.join(', '))}</p>
+    </div>`;
+  });
+  const aging = res.aging || [];
+  if (aging.length) {
+    const days = res.alert_settings ? res.alert_settings.pending_days : 3;
+    html += `
+    <div class="alert-card warn">
+      <p class="alert-title">⏳ ใบลาค้างเกิน ${days} วัน — ${aging.length} ใบ</p>
+      <p class="alert-sub">${aging.slice(0, 3).map((a) =>
+        `${esc(a.emp_name)} รอ ${a.waiting_days} วัน${a.approver_name ? ' (รอ' + esc(a.approver_name) + ')' : ''}`).join(' · ')}${aging.length > 3 ? ` และอีก ${aging.length - 3} ใบ` : ''}</p>
+    </div>`;
+  }
+  $('#dash-alerts').innerHTML = html;
+}
+
+function renderDashStats(res) {
+  const onLeave = res.stats.onLeaveToday;
+  const third = res.used_percent != null
+    ? `<div class="s-num">${res.used_percent}%</div><div class="s-label">ใช้ไปจากสิทธิ์รวม</div>`
+    : `<div class="s-num">${fmtNum(res.stats.usedTotal)}</div><div class="s-label">วันลาที่ใช้ปีนี้</div>`;
+  $('#dash-stats').innerHTML = `
+    <div class="stat-card"><div class="s-num warn-c">${res.stats.pending}</div><div class="s-label">รออนุมัติ</div></div>
+    <div class="stat-card" title="${esc(onLeave.join(', '))}"><div class="s-num ok-c">${onLeave.length}</div><div class="s-label">ลาวันนี้${onLeave.length ? '<br>' + esc(onLeave.map(firstName).join(', ')) : ''}</div></div>
+    <div class="stat-card">${third}</div>`;
+}
+
+function renderTrend(res) {
+  const card = $('#trend-card');
+  if (!res.monthly || !res.monthly.length) return card.classList.add('hidden');
+  card.classList.remove('hidden');
+  const max = Math.max(1, ...res.monthly.map((m) => m.days));
+  const last = res.monthly.length - 1;
+  const bars = res.monthly.map((m, i) =>
+    `<div class="${i === last ? 'cur' : ''}" style="height:${Math.round((m.days / max) * 70) + 6}px" title="${esc(m.ym)}: ${fmtNum(m.days)} วัน"></div>`).join('');
+  const lbls = res.monthly.map((m, i) => {
+    const [y, mm] = m.ym.split('-').map(Number);
+    const name = new Date(y, mm - 1, 1).toLocaleDateString('th-TH', { month: 'short' });
+    return `<span class="${i === last ? 'cur' : ''}">${esc(name)}</span>`;
+  }).join('');
+  $('#dash-trend').innerHTML = `<div class="trend-bars">${bars}</div><div class="trend-lbls">${lbls}</div>`;
 }
 
 function renderCalendar() {
   const res = state.dashboard;
+  const clashN = res.alert_settings ? res.alert_settings.clash_people : 3;
   const y = state.calMonth.getFullYear();
   const m = state.calMonth.getMonth();
   $('#cal-title').textContent = state.calMonth.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
@@ -476,23 +527,74 @@ function renderCalendar() {
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const today = fmtDate(new Date());
 
-  let html = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((d) => `<div class="cal-dow">${d}</div>`).join('');
-  for (let i = 0; i < firstDow; i++) html += '<div class="cal-cell off"></div>';
+  let html = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((d) => `<span class="dw">${d}</span>`).join('');
+  for (let i = 0; i < firstDow; i++) html += '<span></span>';
 
   for (let day = 1; day <= daysInMonth; day++) {
     const ds = fmtDate(new Date(y, m, day));
     const dow = new Date(y, m, day).getDay();
     const isOff = !state.workAllWeek && (dow === 0 || dow === 6 || state.holidays.has(ds));
-    const chips = isOff ? [] : res.leaves.filter((l) => l.start_date <= ds && ds <= l.end_date);
-    const shown = chips.slice(0, 3);
-    html += `<div class="cal-cell${isOff ? ' off' : ''}${ds === today ? ' today' : ''}">
-      <span class="cal-daynum">${day}</span>
-      ${shown.map((l) => `<span class="cal-chip${l.status === 'pending' ? ' pending' : ''}" title="${esc(l.emp_name)} · ${esc(typeName(l.type_id))}">${esc(firstName(l.emp_name))}</span>`).join('')}
-      ${chips.length > 3 ? `<span class="cal-daynum">+${chips.length - 3}</span>` : ''}
-    </div>`;
+    const covering = isOff ? [] : res.leaves.filter((l) => l.start_date <= ds && ds <= l.end_date);
+    const names = [...new Set(covering.map((l) => l.emp_name))];
+    const approvedRows = covering.filter((l) => l.status === 'approved');
+
+    let cls = '';
+    if (names.length >= clashN) cls = 'hot';
+    else if (approvedRows.length) cls = approvedRows[0].type_id === 'SICK' ? 'p2' : 'on';
+    else if (covering.length) cls = 'pn';
+    if (isOff) cls += ' off';
+    if (ds === today) cls += ' td';
+    if (names.length) cls += ' has';
+
+    const click = names.length
+      ? ` onclick="toast('${esc(fmtThai(ds))}: ${esc(names.join(', '))}')"`
+      : '';
+    html += `<span class="${cls.trim()}"${click}>${day}</span>`;
   }
-  $('#calendar').innerHTML = `<div class="cal-grid">${html}</div>`;
+  $('#calendar').innerHTML = `<div class="cal7">${html}</div>`;
 }
+
+function renderUpcoming(res) {
+  const today = fmtDate(new Date());
+  const limit = fmtDate(new Date(Date.now() + 14 * 86400000));
+  const list = res.leaves
+    .filter((l) => l.end_date >= today && l.start_date <= limit)
+    .sort((a, b) => (a.start_date < b.start_date ? -1 : 1))
+    .slice(0, 8);
+  $('#dash-upcoming').innerHTML = list.length
+    ? list.map((l) => `
+      <div class="up-row">
+        <span class="up-name">${esc(l.emp_name)} <span class="up-date">${fmtThai(l.start_date)}${l.start_date !== l.end_date ? ' – ' + fmtThai(l.end_date) : ''}</span></span>
+        <span class="badge ${l.status === 'pending' ? 'pending' : 'approved'}">${l.status === 'pending' ? 'รออนุมัติ' : esc(typeName(l.type_id))}</span>
+      </div>`).join('')
+    : '<div class="empty" style="padding:16px 0">ไม่มีใครลาช่วง 14 วันนี้</div>';
+}
+
+$('#dash-export').addEventListener('click', async () => {
+  const btn = $('#dash-export');
+  btn.disabled = true;
+  try {
+    const res = await api('report');
+    const head = ['เลขที่ใบลา', 'รหัสพนักงาน', 'ชื่อ', 'ประเภท', 'วันเริ่ม', 'วันสิ้นสุด', 'จำนวนวัน', 'สถานะ', 'ผู้อนุมัติ', 'ยื่นเมื่อ', 'เหตุผล'];
+    const rows = res.rows.map((r) => [r.req_id, r.emp_id, r.emp_name, typeName(r.type_id), r.start_date, r.end_date,
+      r.days, STATUS_TH[r.status] || r.status, r.approver_id, r.created_at, r.reason]);
+    const csv = [head].concat(rows)
+      .map((cols) => cols.map((c) => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+    // นำหน้าด้วย UTF-8 BOM เพื่อให้ Excel เปิดภาษาไทยไม่เพี้ยน
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `leave-report-${res.year}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`ดาวน์โหลดรายงานปี ${res.year} แล้ว (${res.rows.length} รายการ)`);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 $('#cal-prev').addEventListener('click', () => { state.calMonth.setMonth(state.calMonth.getMonth() - 1); renderCalendar(); });
 $('#cal-next').addEventListener('click', () => { state.calMonth.setMonth(state.calMonth.getMonth() + 1); renderCalendar(); });

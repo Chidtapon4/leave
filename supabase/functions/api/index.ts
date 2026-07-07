@@ -41,6 +41,7 @@ Deno.serve(async (req) => {
       pending: apiPending,
       decide: apiDecide,
       dashboard: apiDashboard,
+      report: apiReport,
       addEmployee: apiAddEmployee,
       employees: apiEmployees,
       updateEmployee: apiUpdateEmployee,
@@ -319,45 +320,149 @@ async function apiDashboard(b: any) {
   const emp = await auth(b.token);
   requireRole(emp, ['admin']);
 
-  const year = todayBkk().slice(0, 4);
   const today = todayBkk();
+  const year = today.slice(0, 4);
   const types = await getTypes();
+  const settings = await getSettings();
 
-  const [emps, pendingCount, yearRows] = await Promise.all([
+  // ช่วงกราฟรายเดือน: 6 เดือนล่าสุดรวมเดือนนี้
+  const now = new Date(today + 'T00:00:00Z');
+  const from6 = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1)).toISOString().slice(0, 10);
+
+  const [emps, pendingRows, yearRows, sixMonthRows, holRows, quotaRows] = await Promise.all([
     supa.from('employees').select('*').order('emp_id'),
-    supa.from('leave_requests').select('req_id', { count: 'exact', head: true }).eq('status', 'pending'),
+    supa.from('leave_requests').select('req_id,emp_id,created_at,start_date, employees!leave_requests_emp_id_fkey(name, manager_id)').eq('status', 'pending'),
     supa.from('leave_requests')
       .select('*, employees!leave_requests_emp_id_fkey(name)')
       .gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`),
+    supa.from('leave_requests').select('start_date,days,status').gte('start_date', from6),
+    supa.from('holidays').select('date,name').gte('date', today).order('date').limit(1),
+    supa.from('quotas').select('*'),
   ]);
   if (emps.error) throw new Error(emps.error.message);
   if (yearRows.error) throw new Error(yearRows.error.message);
 
+  const empList = emps.data ?? [];
+  const empById: Record<string, any> = {};
+  for (const e of empList) empById[e.emp_id] = e;
+
   const thisYear = (yearRows.data ?? []).map((r: any) => numify({ ...r, emp_name: r.employees?.name ?? r.emp_id, employees: undefined }));
   const approved = thisYear.filter((r: any) => r.status === 'approved');
+  const active = thisYear.filter((r: any) => r.status === 'approved' || r.status === 'pending');
+
+  // ใบลาค้างนานเกินกำหนด
+  const aging = (pendingRows.data ?? [])
+    .map((r: any) => ({
+      req_id: r.req_id,
+      emp_name: r.employees?.name ?? r.emp_id,
+      approver_name: empById[r.employees?.manager_id]?.name ?? '',
+      start_date: fmtDateOnly(r.start_date),
+      waiting_days: Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000),
+    }))
+    .filter((r: any) => r.waiting_days >= settings.pendingDays)
+    .sort((a: any, b: any) => b.waiting_days - a.waiting_days);
+
+  // วันที่คนลาพร้อมกันเยอะใน 30 วันข้างหน้า
+  const holidaySet = new Set(await getHolidays());
+  const limit30 = new Date(now.getTime() + 30 * 86400000).toISOString().slice(0, 10);
+  const dayMap: Record<string, Set<string>> = {};
+  for (const r of active) {
+    const d = new Date((r.start_date > today ? r.start_date : today) + 'T00:00:00Z');
+    const end = new Date((r.end_date < limit30 ? r.end_date : limit30) + 'T00:00:00Z');
+    while (d <= end) {
+      const ds = d.toISOString().slice(0, 10);
+      const dow = d.getUTCDay();
+      if (settings.workAllWeek || (dow !== 0 && dow !== 6 && !holidaySet.has(ds))) {
+        (dayMap[ds] = dayMap[ds] ?? new Set()).add(r.emp_name);
+      }
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+  }
+  const clashes = Object.keys(dayMap)
+    .filter((ds) => dayMap[ds].size >= settings.clashPeople)
+    .sort()
+    .slice(0, 3)
+    .map((ds) => ({ date: ds, count: dayMap[ds].size, names: [...dayMap[ds]] }));
+
+  // วันลารายเดือน 6 เดือนล่าสุด (นับจากเดือนของวันเริ่มลา เฉพาะที่อนุมัติ)
+  const monthly = [];
+  for (let i = 5; i >= 0; i--) {
+    const ym = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7);
+    const days = (sixMonthRows.data ?? [])
+      .filter((r: any) => r.status === 'approved' && String(r.start_date).slice(0, 7) === ym)
+      .reduce((s: number, r: any) => s + Number(r.days), 0);
+    monthly.push({ ym, days });
+  }
+
+  // % การใช้สิทธิ์รวมทั้งบริษัท (เฉพาะประเภทที่มีโควตา)
+  const overrides: Record<string, Record<string, number>> = {};
+  for (const q of quotaRows.data ?? []) {
+    (overrides[String(q.emp_id).trim()] = overrides[String(q.emp_id).trim()] ?? {})[q.type_id] = Number(q.quota_days);
+  }
+  const quotaTypeIds = new Set(types.filter((t) => t.quota_days !== null).map((t) => t.type_id));
+  let totalQuota = 0;
+  for (const e of empList) {
+    for (const t of types) {
+      if (t.quota_days === null && !(overrides[e.emp_id]?.[t.type_id] !== undefined)) continue;
+      totalQuota += overrides[e.emp_id]?.[t.type_id] ?? Number(t.quota_days ?? 0);
+    }
+  }
+  const usedQuota = approved.filter((r: any) => quotaTypeIds.has(r.type_id)).reduce((s: number, r: any) => s + r.days, 0);
 
   const employees = [];
-  for (const e of emps.data ?? []) {
+  for (const e of empList) {
     employees.push({ emp_id: e.emp_id, name: e.name, dept: e.dept, balances: await balances(e.emp_id) });
   }
+
+  const nh = holRows.data?.[0];
 
   return {
     ok: true,
     types,
     stats: {
-      pending: pendingCount.count ?? 0,
+      pending: (pendingRows.data ?? []).length,
       onLeaveToday: approved.filter((r: any) => r.start_date <= today && today <= r.end_date).map((r: any) => r.emp_name),
       usedTotal: approved.reduce((s: number, r: any) => s + r.days, 0),
     },
-    typeUsage: types.map((t) => ({
-      type_id: t.type_id, name: t.name, quota: t.quota_days,
-      used: approved.filter((r: any) => r.type_id === t.type_id).reduce((s: number, r: any) => s + r.days, 0),
-    })),
+    used_percent: totalQuota > 0 ? Math.round(usedQuota / totalQuota * 100) : null,
+    aging,
+    clashes,
+    monthly,
+    next_holiday: nh
+      ? { date: fmtDateOnly(nh.date), name: nh.name, days_until: Math.round((new Date(fmtDateOnly(nh.date) + 'T00:00:00Z').getTime() - now.getTime()) / 86400000) }
+      : null,
+    alert_settings: { pending_days: settings.pendingDays, clash_people: settings.clashPeople },
     employees,
     leaves: thisYear
       .filter((r: any) => r.status === 'approved' || r.status === 'pending')
       .map((r: any) => ({ emp_name: r.emp_name, type_id: r.type_id, start_date: r.start_date, end_date: r.end_date, status: r.status, days: r.days })),
   };
+}
+
+// รายงานใบลาทั้งปีสำหรับ export CSV (admin)
+async function apiReport(b: any) {
+  const emp = await auth(b.token);
+  requireRole(emp, ['admin']);
+  const year = /^\d{4}$/.test(String(b.year ?? '')) ? String(b.year) : todayBkk().slice(0, 4);
+  const { data, error } = await supa.from('leave_requests')
+    .select('*, employees!leave_requests_emp_id_fkey(name)')
+    .gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`)
+    .order('start_date');
+  if (error) throw new Error(error.message);
+  return {
+    ok: true,
+    year,
+    rows: (data ?? []).map((r: any) => ({
+      req_id: r.req_id, emp_id: r.emp_id, emp_name: r.employees?.name ?? r.emp_id,
+      type_id: r.type_id, start_date: r.start_date, end_date: r.end_date,
+      days: Number(r.days), status: r.status, approver_id: r.approver_id ?? '',
+      created_at: String(r.created_at).slice(0, 10), reason: r.reason ?? '',
+    })),
+  };
+}
+
+function fmtDateOnly(v: unknown): string {
+  return String(v).slice(0, 10);
 }
 
 // ---------- จัดการพนักงาน (HR/admin) ----------
@@ -610,8 +715,19 @@ async function getHolidays(): Promise<string[]> {
 }
 
 async function workAllWeek(): Promise<boolean> {
-  const { data } = await supa.from('settings').select('value').eq('key', 'work_all_week').maybeSingle();
-  return data?.value !== 'false'; // ค่าเริ่มต้น true
+  return (await getSettings()).workAllWeek;
+}
+
+// ค่าตั้งระบบทั้งหมด (แถวไหนไม่มีในตาราง settings ใช้ค่าเริ่มต้น)
+async function getSettings() {
+  const { data } = await supa.from('settings').select('*');
+  const m: Record<string, string> = {};
+  for (const r of data ?? []) m[r.key] = String(r.value);
+  return {
+    workAllWeek: m['work_all_week'] !== 'false',
+    pendingDays: Number(m['alert_pending_days'] ?? 3),   // ใบลาค้างกี่วันถึงเตือน
+    clashPeople: Number(m['alert_clash_people'] ?? 3),   // ลาพร้อมกันกี่คนถึงเตือน
+  };
 }
 
 // numeric ของ Postgres มาเป็น string — แปลงเป็นตัวเลขให้หน้าเว็บ

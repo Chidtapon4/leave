@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
@@ -32,10 +32,12 @@
 
   <!-- แถบบนหลัง login -->
   <header id="topbar" class="hidden">
-    <span id="topbar-title">ยื่นใบลา</span>
-    <div class="topbar-right">
-      <button id="topbar-user" class="topbar-user" title="ข้อมูลของฉัน"></button>
-      <button id="logout-btn" class="btn small" title="ออกจากระบบ">ออก</button>
+    <div class="topbar-inner">
+      <div>
+        <p id="topbar-date"></p>
+        <p id="topbar-title">ยื่นใบลา</p>
+      </div>
+      <button id="topbar-user" class="topbar-avatar" title="ข้อมูลของฉัน"></button>
     </div>
   </header>
 
@@ -92,6 +94,7 @@
         </div>
         <button type="submit" class="btn primary full" id="p-submit">เปลี่ยน PIN</button>
       </form>
+      <button type="button" id="logout-btn" class="btn danger full" style="margin-bottom: 16px;">ออกจากระบบ</button>
     </section>
 
     <!-- ประวัติใบลาของฉัน -->
@@ -106,11 +109,16 @@
 
     <!-- dashboard (HR/admin) -->
     <section id="view-dashboard" class="view hidden wide">
+      <p id="dash-holiday" class="dash-holiday hidden"></p>
+      <div id="dash-alerts"></div>
       <div id="dash-stats" class="stat-grid"></div>
 
-      <div class="card">
-        <h2>การใช้วันลาปีนี้ (ทั้งบริษัท)</h2>
-        <div id="dash-usage"></div>
+      <div class="card hidden" id="trend-card">
+        <div class="cal-head">
+          <h2>วันลารายเดือน</h2>
+          <span class="muted" style="font-size: 12px;">6 เดือนล่าสุด · เฉพาะที่อนุมัติ</span>
+        </div>
+        <div id="dash-trend"></div>
       </div>
 
       <div class="card">
@@ -120,7 +128,13 @@
           <button class="btn small" id="cal-next">›</button>
         </div>
         <div id="calendar"></div>
-        <p class="muted small-note">สีทึบ = อนุมัติแล้ว · สีจาง = รออนุมัติ</p>
+        <p class="small-note">เขียว/ฟ้า = อนุมัติแล้ว · เหลือง = รออนุมัติ · แดง = ลาพร้อมกันหลายคน · กรอบ = วันนี้ · แตะวันที่มีสีเพื่อดูรายชื่อ</p>
+      </div>
+
+      <div class="card">
+        <h2>ลาช่วง 14 วันนี้</h2>
+        <div id="dash-upcoming"></div>
+        <button type="button" id="dash-export" class="btn full" style="margin-top: 12px;">⬇ ดาวน์โหลดรายงานปีนี้ (CSV)</button>
       </div>
 
       <div class="card">
@@ -181,17 +195,17 @@
   </main>
 
   <nav id="bottomnav" class="hidden">
-    <button data-view="home" class="nav-btn active"><span>📝</span>ยื่นลา</button>
-    <button data-view="history" class="nav-btn"><span>🕘</span>ประวัติ</button>
-    <button data-view="approve" class="nav-btn hidden"><span>✅</span>อนุมัติ</button>
-    <button data-view="dashboard" class="nav-btn hidden"><span>📊</span>สรุป</button>
-    <button data-view="staff" class="nav-btn hidden"><span>👥</span>พนักงาน</button>
+    <button data-view="home" class="nav-btn active"><span>📝</span><span class="lbl">ยื่นลา</span></button>
+    <button data-view="history" class="nav-btn"><span>🕘</span><span class="lbl">ประวัติ</span></button>
+    <button data-view="approve" class="nav-btn hidden"><span>✅</span><span class="lbl">อนุมัติ</span></button>
+    <button data-view="dashboard" class="nav-btn hidden"><span>📊</span><span class="lbl">สรุป</span></button>
+    <button data-view="staff" class="nav-btn hidden"><span>👥</span><span class="lbl">พนักงาน</span></button>
   </nav>
 
   <div id="toast" class="toast hidden"></div>
   <div id="loading" class="loading hidden"><div class="spinner"></div></div>
 
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
