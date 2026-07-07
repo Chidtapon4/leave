@@ -247,7 +247,46 @@ td .low { color: var(--danger); font-weight: 600; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---------- จอใหญ่ (PC) ---------- */
+/* ---------- แท็บเล็ต ---------- */
 @media (min-width: 768px) {
   .cal7 span { padding: 12px 0; font-size: 13px; }
+}
+
+/* ---------- จอ PC: เมนูล่างกลายเป็น sidebar ซ้าย + dashboard 2 คอลัมน์ ---------- */
+@media (min-width: 900px) {
+  #bottomnav {
+    left: 0; top: 0; bottom: 0; transform: none;
+    width: 232px; margin: 0;
+    border-radius: 0; border: none; border-right: 0.5px solid var(--border);
+    box-shadow: none; background: var(--card);
+    flex-direction: column; justify-content: flex-start; align-items: stretch;
+    gap: 6px; padding: 24px 14px;
+  }
+  #bottomnav::before {
+    content: '🌴 ระบบแจ้งลางาน';
+    display: block; font-size: 15px; font-weight: 600; color: var(--text);
+    padding: 6px 14px 20px;
+  }
+  .nav-btn { flex: none; justify-content: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px; font-size: 14px; }
+  .nav-btn .lbl { display: inline; font-size: 14px; }
+  .nav-btn.active { flex: none; }
+  .nav-btn:hover { background: var(--bg); }
+  .nav-btn.active:hover { background: var(--primary-soft); }
+
+  #topbar { margin-left: 232px; }
+  .topbar-inner { margin: 0; max-width: 680px; padding: 22px 36px 10px; }
+  main { margin: 0 0 0 232px; max-width: 680px; padding: 6px 36px 48px; }
+
+  /* หน้า dashboard ใช้พื้นที่กว้างขึ้น */
+  body:has(#view-dashboard:not(.hidden)) .topbar-inner,
+  body:has(#view-dashboard:not(.hidden)) main { max-width: 1080px; }
+
+  #view-dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
+  #view-dashboard.hidden { display: none; }
+  #dash-holiday, #dash-alerts, #dash-stats, #table-card { grid-column: 1 / -1; }
+  .stat-card .s-num { font-size: 26px; }
+  .trend-bars { height: 120px; }
+
+  .toast { bottom: 32px; }
+  .loading { left: 232px; }
 }

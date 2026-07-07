@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="utf-8">
@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -121,7 +121,7 @@
         <div id="dash-trend"></div>
       </div>
 
-      <div class="card">
+      <div class="card" id="cal-card">
         <div class="cal-head">
           <button class="btn small" id="cal-prev">‹</button>
           <h2 id="cal-title"></h2>
@@ -131,13 +131,13 @@
         <p class="small-note">เขียว/ฟ้า = อนุมัติแล้ว · เหลือง = รออนุมัติ · แดง = ลาพร้อมกันหลายคน · กรอบ = วันนี้ · แตะวันที่มีสีเพื่อดูรายชื่อ</p>
       </div>
 
-      <div class="card">
+      <div class="card" id="up-card">
         <h2>ลาช่วง 14 วันนี้</h2>
         <div id="dash-upcoming"></div>
         <button type="button" id="dash-export" class="btn full" style="margin-top: 12px;">⬇ ดาวน์โหลดรายงานปีนี้ (CSV)</button>
       </div>
 
-      <div class="card">
+      <div class="card" id="table-card">
         <h2>วันลาคงเหลือรายคน</h2>
         <div class="table-scroll"><table id="dash-table"></table></div>
       </div>
@@ -205,7 +205,7 @@
   <div id="toast" class="toast hidden"></div>
   <div id="loading" class="loading hidden"><div class="spinner"></div></div>
 
-  <script src="config.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
