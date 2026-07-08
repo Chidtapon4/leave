@@ -1,0 +1,9 @@
+// Cloudflare Workers config — บอกระบบ build ว่า repo นี้คือ Worker ชื่อ "leave"
+// (เสิร์ฟไฟล์ static ทั้งโฟลเดอร์ ยกเว้นที่ระบุใน .assetsignore)
+{
+  "name": "leave",
+  "compatibility_date": "2026-01-01",
+  "assets": {
+    "directory": "."
+  }
+}

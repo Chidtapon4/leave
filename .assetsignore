@@ -1,0 +1,9 @@
+.git
+.gitignore
+.assetsignore
+.claude
+wrangler.jsonc
+README.md
+MIGRATE-SUPABASE.md
+apps-script
+supabase
