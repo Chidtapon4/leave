@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -107,6 +107,23 @@
       <div id="approve-list" class="list"></div>
     </section>
 
+    <!-- สรุปของฉัน (ทุกคน) -->
+    <section id="view-mydash" class="view hidden">
+      <div class="card" id="my-hero"></div>
+      <div id="my-nudge"></div>
+      <div class="card">
+        <h2>ใบลาที่กำลังจะถึง</h2>
+        <div id="my-upcoming"></div>
+      </div>
+      <div class="card">
+        <div class="cal-head">
+          <h2>การลาของฉันรายเดือน</h2>
+          <span class="muted" style="font-size: 12px;">6 เดือนล่าสุด · เฉพาะที่อนุมัติ</span>
+        </div>
+        <div id="my-trend"></div>
+      </div>
+    </section>
+
     <!-- dashboard (HR/admin) -->
     <section id="view-dashboard" class="view hidden wide">
       <p id="dash-holiday" class="dash-holiday hidden"></p>
@@ -197,15 +214,16 @@
   <nav id="bottomnav" class="hidden">
     <button data-view="home" class="nav-btn active"><span>📝</span><span class="lbl">ยื่นลา</span></button>
     <button data-view="history" class="nav-btn"><span>🕘</span><span class="lbl">ประวัติ</span></button>
+    <button data-view="mydash" class="nav-btn"><span>📈</span><span class="lbl">สรุป</span></button>
     <button data-view="approve" class="nav-btn hidden"><span>✅</span><span class="lbl">อนุมัติ</span></button>
-    <button data-view="dashboard" class="nav-btn hidden"><span>📊</span><span class="lbl">สรุป</span></button>
+    <button data-view="dashboard" class="nav-btn hidden"><span>📊</span><span class="lbl">ภาพรวม</span></button>
     <button data-view="staff" class="nav-btn hidden"><span>👥</span><span class="lbl">พนักงาน</span></button>
   </nav>
 
   <div id="toast" class="toast hidden"></div>
   <div id="loading" class="loading hidden"><div class="spinner"></div></div>
 
-  <script src="config.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="config.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

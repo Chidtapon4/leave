@@ -21,7 +21,14 @@ const state = {
 
 const STATUS_TH = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ', cancelled: 'ยกเลิก' };
 const ROLE_TH = { employee: 'พนักงาน', approver: 'หัวหน้า', admin: 'HR/แอดมิน' };
-const VIEW_TITLE = { home: 'ยื่นใบลา', history: 'ประวัติการลา', approve: 'รออนุมัติ', dashboard: 'สรุปภาพรวม (HR)', staff: 'จัดการพนักงาน', profile: 'ข้อมูลของฉัน' };
+const VIEW_TITLE = { home: 'ยื่นใบลา', history: 'ประวัติการลา', mydash: 'สรุปของฉัน', approve: 'รออนุมัติ', dashboard: 'สรุปภาพรวม (HR)', staff: 'จัดการพนักงาน', profile: 'ข้อมูลของฉัน' };
+
+// สีประจำประเภทลา (ผ่านตรวจ colorblind-safe แล้ว) — เรียงตามลำดับประเภทใน LeaveTypes
+const TYPE_PALETTE = ['#12A171', '#4A8FD9', '#C98A16', '#7C6BD9', '#C2547C'];
+function typeColor(typeId) {
+  const i = state.types.findIndex((t) => t.type_id === typeId);
+  return TYPE_PALETTE[i >= 0 ? i % TYPE_PALETTE.length : 0];
+}
 
 // ---------- เรียก API ----------
 
@@ -111,6 +118,7 @@ function switchView(name) {
     ? 'สวัสดี, ' + firstName(state.profile.name)
     : VIEW_TITLE[name];
   if (name === 'history') loadHistory();
+  if (name === 'mydash') loadMyDash();
   if (name === 'approve') loadPending();
   if (name === 'dashboard') loadDashboard();
   if (name === 'staff') loadStaff();
@@ -389,6 +397,103 @@ async function cancelReq(reqId) {
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+// ---------- สรุปของฉัน (ทุกคน) ----------
+
+async function loadMyDash() {
+  try {
+    const res = await api('myRequests');
+    state.myRequests = res.requests;
+    renderMyHero();
+    renderMyNudge();
+    renderMyUpcoming();
+    renderMyTrend();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function renderMyHero() {
+  const quotaTypes = state.balances.filter((b) => b.quota !== null);
+  const totalRemaining = quotaTypes.reduce((s, b) => s + b.remaining, 0);
+  const totalQuota = quotaTypes.reduce((s, b) => s + b.quota, 0);
+  const totalUsed = quotaTypes.reduce((s, b) => s + b.used, 0);
+  const totalPending = quotaTypes.reduce((s, b) => s + b.pending, 0);
+  const rows = quotaTypes.map((b) => {
+    const pct = b.quota > 0 ? Math.min(100, (b.used / b.quota) * 100) : 0;
+    const color = typeColor(b.type_id);
+    return `
+    <div class="tr-row">
+      <span class="tr-dot" style="background:${color}"></span>
+      <span class="tr-name">${esc(b.name)}</span>
+      <div class="tr-bar"><div class="tr-fill" style="width:${pct}%;background:${color}"></div></div>
+      <span class="tr-val">${fmtNum(b.used)}/${fmtNum(b.quota)}</span>
+    </div>`;
+  }).join('');
+  $('#my-hero').innerHTML = `
+    <p class="my-label">วันลาคงเหลือรวมปีนี้</p>
+    <p class="my-total">${fmtNum(totalRemaining)} <span>วัน จากสิทธิ์ ${fmtNum(totalQuota)}</span></p>
+    <p class="my-sub">ใช้ไป ${fmtNum(totalUsed)} วัน${totalPending ? ` · รออนุมัติ ${fmtNum(totalPending)} วัน` : ''}</p>
+    ${rows}`;
+}
+
+// เตือนให้ใช้สิทธิ์: ครึ่งปีหลัง + พักร้อน (VAC) ยังเหลือ
+function renderMyNudge() {
+  const box = $('#my-nudge');
+  const vac = state.balances.find((b) => b.type_id === 'VAC');
+  const now = new Date();
+  if (!vac || vac.quota === null || vac.remaining <= 0 || now.getMonth() + 1 < 7) {
+    box.innerHTML = '';
+    return;
+  }
+  const yearEnd = new Date(now.getFullYear(), 11, 31);
+  const daysLeft = Math.ceil((yearEnd - now) / 86400000);
+  box.innerHTML = `
+    <div class="alert-card warn">
+      <p class="alert-title">🔔 ${esc(vac.name)}เหลือ ${fmtNum(vac.remaining)} วัน — สิทธิ์หมดสิ้นปีนี้ (อีก ${daysLeft} วัน)</p>
+    </div>`;
+}
+
+function renderMyUpcoming() {
+  const today = fmtDate(new Date());
+  const list = state.myRequests
+    .filter((r) => r.status === 'pending' || (r.status === 'approved' && r.end_date >= today))
+    .sort((a, b) => (a.start_date < b.start_date ? -1 : 1));
+  $('#my-upcoming').innerHTML = list.length
+    ? list.map((r) => {
+      const daysTo = Math.ceil((parseDate(r.start_date) - parseDate(today)) / 86400000);
+      const waiting = r.created_at ? Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000) : NaN;
+      const note = r.status === 'pending'
+        ? (isNaN(waiting) ? '' : (waiting > 0 ? ` · รอมาแล้ว ${waiting} วัน` : ' · ยื่นวันนี้'))
+        : (daysTo > 0 ? ` (อีก ${daysTo} วัน)` : ' (กำลังลาอยู่)');
+      return `
+      <div class="up-row">
+        <span class="up-name">${esc(typeName(r.type_id))} <span class="up-date">${fmtThai(r.start_date)}${r.start_date !== r.end_date ? ' – ' + fmtThai(r.end_date) : ''}${note}</span></span>
+        <span class="badge ${esc(r.status)}">${STATUS_TH[r.status] || esc(r.status)}</span>
+      </div>`;
+    }).join('')
+    : '<div class="empty" style="padding:16px 0">ไม่มีใบลาค้างอยู่ — ยื่นใบใหม่ได้ที่แท็บยื่นลา</div>';
+}
+
+function renderMyTrend() {
+  const now = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    const days = state.myRequests
+      .filter((r) => r.status === 'approved' && String(r.start_date).slice(0, 7) === ym)
+      .reduce((s, r) => s + (Number(r.days) || 0), 0);
+    months.push({ ym, days, name: d.toLocaleDateString('th-TH', { month: 'short' }) });
+  }
+  const max = Math.max(1, ...months.map((m) => m.days));
+  const last = months.length - 1;
+  $('#my-trend').innerHTML =
+    `<div class="trend-bars">${months.map((m, i) =>
+      `<div class="${i === last ? 'cur' : ''}" style="height:${Math.round((m.days / max) * 70) + 6}px" title="${esc(m.ym)}: ${fmtNum(m.days)} วัน"></div>`).join('')}</div>` +
+    `<div class="trend-lbls">${months.map((m, i) =>
+      `<span class="${i === last ? 'cur' : ''}">${esc(m.name)}</span>`).join('')}</div>`;
 }
 
 // ---------- รออนุมัติ (หัวหน้า/แอดมิน) ----------
